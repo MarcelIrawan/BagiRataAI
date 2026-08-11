@@ -533,10 +533,12 @@ function resetBillState(clearFriends) {
   const svc = document.getElementById('serviceInput');
   const disc = document.getElementById('discountInput');
   const file = document.getElementById('fileInput');
+  const galFile = document.getElementById('galleryInput');
   if (tax) tax.value = '';
   if (svc) svc.value = '';
   if (disc) disc.value = '';
   if (file) file.value = '';
+  if (galFile) galFile.value = '';
   updateTeamBillChrome();
 }
 
@@ -590,6 +592,74 @@ function showToast(message) {
   setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
 }
 
+/* ---------- Camera (getUserMedia) ---------- */
+let cameraStream = null;
+
+async function openCamera() {
+  const overlay = document.getElementById('cameraOverlay');
+  const video = document.getElementById('cameraVideo');
+
+  // Use rear camera on mobile (facingMode: environment), any available camera on desktop
+  const constraints = {
+    video: {
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 1920 },
+      height: { ideal: 1080 }
+    },
+    audio: false
+  };
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (err) {
+    console.warn('Camera access failed:', err);
+    showModal(
+      'Kamera Tidak Tersedia',
+      'Tidak dapat mengakses kamera. Pastikan Anda memberikan izin kamera di browser, atau gunakan opsi Unggah dari Galeri sebagai alternatif.'
+    );
+    return;
+  }
+
+  video.srcObject = cameraStream;
+  overlay.classList.remove('hidden');
+  overlay.classList.add('flex');
+  lucide.createIcons();
+}
+
+function capturePhoto() {
+  const video = document.getElementById('cameraVideo');
+  const canvas = document.getElementById('cameraCanvas');
+  const ctx = canvas.getContext('2d');
+
+  // Set canvas size to match video dimensions
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  // Extract base64 JPEG from canvas
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  const base64Data = dataUrl.split(',')[1];
+
+  closeCamera();
+  processImageWithAI(base64Data, 'image/jpeg');
+}
+
+function closeCamera() {
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream = null;
+  }
+  const video = document.getElementById('cameraVideo');
+  video.srcObject = null;
+  const overlay = document.getElementById('cameraOverlay');
+  overlay.classList.add('hidden');
+  overlay.classList.remove('flex');
+}
+
+function openGallery() {
+  document.getElementById('galleryInput').click();
+}
+
 function handleFileSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -599,6 +669,8 @@ function handleFileSelect(event) {
     processImageWithAI(base64Data, file.type);
   };
   reader.readAsDataURL(file);
+  // Reset input so re-selecting the same file still triggers onchange
+  event.target.value = '';
 }
 
 async function processImageWithAI(base64Data, mimeType) {

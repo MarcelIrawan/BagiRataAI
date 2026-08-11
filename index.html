@@ -205,12 +205,34 @@
                 <h2 class="text-xl font-bold text-[#3D312A]">Unggah Foto Nota / Struk Pembayaran</h2>
                 <p class="text-sm text-[#9C6F44]">Foto nota kasir Anda dan biarkan AI memproses item, harga, pajak, hingga diskon secara otomatis.</p>
 
-                <div id="dropZone" onclick="document.getElementById('fileInput').click()" class="border-2 border-dashed border-[#D4A373] hover:border-[#6F4E37] bg-[#FAF6F0] hover:bg-[#F3ECE0] rounded-xl p-8 cursor-pointer transition flex flex-col items-center justify-center group">
-                    <input type="file" id="fileInput" class="hidden" accept="image/*" onchange="handleFileSelect(event)">
-                    <div class="w-14 h-14 rounded-full bg-[#F3ECE0] group-hover:bg-[#E6CCB2] text-[#6F4E37] flex items-center justify-center mb-3 transition">
-                        <i data-lucide="upload-cloud" class="w-7 h-7"></i>
+                <!-- Hidden file inputs -->
+                <input type="file" id="galleryInput" class="hidden" accept="image/*" onchange="handleFileSelect(event)">
+                <input type="file" id="fileInput" class="hidden" accept="image/*" onchange="handleFileSelect(event)">
+
+                <!-- Camera & Gallery buttons -->
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="openCamera()" class="bg-[#6F4E37] text-[#FDFBF7] font-semibold text-sm px-4 py-5 rounded-xl hover:bg-[#5C3D2E] transition shadow-sm flex flex-col items-center gap-2 group">
+                        <div class="w-12 h-12 rounded-full bg-[#FDFBF7]/20 group-hover:bg-[#FDFBF7]/30 flex items-center justify-center transition">
+                            <i data-lucide="camera" class="w-6 h-6"></i>
+                        </div>
+                        <span>Ambil Foto</span>
+                        <span class="text-[10px] text-[#FDFBF7]/70 font-normal">Langsung dari Kamera</span>
+                    </button>
+                    <button onclick="openGallery()" class="bg-[#D4A373] text-[#3D312A] font-semibold text-sm px-4 py-5 rounded-xl hover:bg-[#B98B5E] hover:text-[#FDFBF7] transition shadow-sm flex flex-col items-center gap-2 group">
+                        <div class="w-12 h-12 rounded-full bg-[#3D312A]/10 group-hover:bg-[#FDFBF7]/20 flex items-center justify-center transition">
+                            <i data-lucide="image" class="w-6 h-6"></i>
+                        </div>
+                        <span>Unggah dari Galeri</span>
+                        <span class="text-[10px] text-[#3D312A]/60 font-normal">Pilih dari Galeri Foto</span>
+                    </button>
+                </div>
+
+                <!-- Drag-and-drop zone (fallback) -->
+                <div id="dropZone" onclick="document.getElementById('galleryInput').click()" class="border-2 border-dashed border-[#D4A373] hover:border-[#6F4E37] bg-[#FAF6F0] hover:bg-[#F3ECE0] rounded-xl p-6 cursor-pointer transition flex flex-col items-center justify-center group">
+                    <div class="w-10 h-10 rounded-full bg-[#F3ECE0] group-hover:bg-[#E6CCB2] text-[#6F4E37] flex items-center justify-center mb-2 transition">
+                        <i data-lucide="upload-cloud" class="w-5 h-5"></i>
                     </div>
-                    <p class="text-sm font-semibold text-[#3D312A]">Klik atau seret foto nota ke sini</p>
+                    <p class="text-sm font-semibold text-[#3D312A]">Atau seret & lepas foto nota ke sini</p>
                     <p class="text-xs text-[#9C6F44] mt-1">Mendukung format JPG, PNG, atau WEBP</p>
                 </div>
 
@@ -354,6 +376,32 @@
             </div>
         </section>
     </main>
+
+    <!-- Camera Overlay -->
+    <div id="cameraOverlay" class="fixed inset-0 bg-black z-50 hidden flex-col items-center justify-center">
+        <video id="cameraVideo" autoplay playsinline class="w-full h-full object-contain bg-black"></video>
+        <canvas id="cameraCanvas" class="hidden"></canvas>
+
+        <!-- Close button (top-right) -->
+        <button onclick="closeCamera()" class="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center transition z-10">
+            <i data-lucide="x" class="w-5 h-5 text-white"></i>
+        </button>
+
+        <!-- Header label -->
+        <div class="absolute top-4 left-4 bg-black/40 backdrop-blur-sm px-3 py-1.5 rounded-lg z-10">
+            <p class="text-white text-xs font-semibold flex items-center gap-1.5">
+                <i data-lucide="camera" class="w-3.5 h-3.5"></i>
+                Arahkan ke Nota / Struk
+            </p>
+        </div>
+
+        <!-- Bottom controls -->
+        <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-16 pb-8 px-6 flex items-center justify-center">
+            <button onclick="capturePhoto()" id="captureBtn" class="w-16 h-16 rounded-full bg-white border-4 border-[#D4A373] hover:border-[#6F4E37] shadow-xl active:scale-95 transition flex items-center justify-center">
+                <div class="w-12 h-12 rounded-full bg-[#D4A373] group-hover:bg-[#6F4E37]"></div>
+            </button>
+        </div>
+    </div>
 
     <div id="customModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden opacity-0 transition-all duration-200">
         <div class="bg-[#FDFBF7] border border-[#E6CCB2] rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl transform scale-95 transition-all duration-200" id="modalContent">
