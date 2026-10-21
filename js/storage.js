@@ -1,63 +1,68 @@
-/** localStorage persistence for BagiRata team periods */
-const STORAGE_KEY = 'bagirata.v1';
+/**
+ * localStorage adapter for bagirata.v2.
+ *
+ * Only reads and writes the raw store. All arithmetic and schema rules live in
+ * domain.js. The v1 key is read once for migration and never written or removed.
+ */
 
-function defaultStore() {
-  return { teams: [], activeTeamId: null };
-}
+import {
+  LEGACY_STORAGE_KEY,
+  SCHEMA_VERSION,
+  STORAGE_KEY,
+  createStore,
+  migrateV1,
+} from './domain.js';
 
-function loadStore() {
+function readJson(key) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultStore();
-    const parsed = JSON.parse(raw);
-    return {
-      teams: Array.isArray(parsed.teams) ? parsed.teams : [],
-      activeTeamId: parsed.activeTeamId || null
-    };
-  } catch (e) {
-    console.error('Failed to load bagirata store', e);
-    return defaultStore();
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (error) {
+    console.error(`Gagal membaca ${key}`, error);
+    return null;
   }
 }
 
-function saveStore(store) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-}
-
-function getTeam(store, teamId) {
-  return (store.teams || []).find(t => t.id === teamId) || null;
-}
-
-function upsertTeam(store, team) {
-  const idx = store.teams.findIndex(t => t.id === team.id);
-  if (idx >= 0) store.teams[idx] = team;
-  else store.teams.push(team);
-  saveStore(store);
-  return store;
-}
-
-function createTeamRecord({ name, members, holderId }) {
+function normalize(store) {
   return {
-    id: uid('team'),
-    name: name.trim(),
-    status: 'open',
-    holderId,
-    members: members.map((m, i) => ({
-      id: m.id || uid('m'),
-      name: m.name,
-      colorIndex: typeof m.colorIndex === 'number' ? m.colorIndex : i % FRIEND_COLORS.length
-    })),
-    bills: [],
-    deposits: [],
-    createdAt: new Date().toISOString(),
-    closedAt: null
+    version: SCHEMA_VERSION,
+    tims: Array.isArray(store.tims) ? store.tims : [],
+    activeTimId: store.activeTimId || null,
+    activePeriodeId: store.activePeriodeId || null,
+    savedAt: store.savedAt || null,
   };
 }
 
-function membersToFriends(members) {
-  return (members || []).map(m => ({
-    id: m.id,
-    name: m.name,
-    color: FRIEND_COLORS[m.colorIndex % FRIEND_COLORS.length]
-  }));
+export function loadStore() {
+  const current = readJson(STORAGE_KEY);
+  if (current && Array.isArray(current.tims)) return normalize(current);
+
+  const legacy = readJson(LEGACY_STORAGE_KEY);
+  if (legacy) {
+    const migrated = normalize(migrateV1(legacy));
+    saveStore(migrated);
+    return migrated;
+  }
+
+  return createStore();
+}
+
+export function saveStore(store) {
+  try {
+    const payload = { ...normalize(store), savedAt: new Date().toISOString() };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    return payload;
+  } catch (error) {
+    console.error('Gagal menyimpan BagiRata', error);
+    return store;
+  }
+}
+
+/** Persist which Tim / Periode is open so a reload lands in the same place. */
+export function saveActive(store, timId, periodeId) {
+  const next = normalize(store);
+  next.activeTimId = timId || null;
+  next.activePeriodeId = periodeId || null;
+  return saveStore(next);
 }
