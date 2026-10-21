@@ -78,8 +78,13 @@ export function periodeLabel(periode, index) {
   return `Periode #${index + 1} · dibuka ${formatDate(periode && periode.openedAt)}`;
 }
 
-export function saldoWord(saldo) {
-  if (saldo > 0) return 'utang ke Holder';
-  if (saldo < 0) return 'kredit dari Holder';
-  return 'lunas';
+/**
+ * WhatsApp is plain text, not HTML: neutralise what could restructure the
+ * message instead of entity-escaping it, which would print literally.
+ */
+export function whatsappSafe(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[*_~`]/g, '')
+    .trim();
 }

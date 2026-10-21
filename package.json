@@ -5,6 +5,6 @@
   "type": "module",
   "description": "BagiRata AI — split bill SPA. This manifest exists only to run the domain tests.",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test \"test/*.test.js\""
   }
 }

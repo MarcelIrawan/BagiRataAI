@@ -549,3 +549,45 @@ test('a participant with no Konsumsi can be dropped, and then leaves no Settleme
 function konsumsiOf(tim, memberId) {
   return settlementRows(tim, periodeOf(tim)).find((r) => r.memberId === memberId).konsumsi;
 }
+
+/* ---------------------------------------------------------------- *
+ * A Periode's Settlement names participants only
+ * ---------------------------------------------------------------- */
+
+test('a non-participant carrying a Saldo is never named in a Periode Settlement', () => {
+  let tim = makeTim();
+  // p1: Citra eats, so she carries a Saldo forward.
+  tim = ok(addNota(tim, 'p1', nota({ id: 'n1', items: [{ name: 'A', qty: 1, price: 10000, assignedTo: ['c'] }], paidBy: [{ memberId: 'h', amount: 10000 }] }), NOW));
+  tim = ok(closePeriode(tim, 'p1', T1));
+
+  // p2: she is not charged, so she is not a participant.
+  tim = ok(openNewPeriode(tim, { id: 'p2', label: 'November', openedAt: T1 }));
+  tim = ok(setParticipants(tim, 'p2', ['h', 'a']));
+
+  const carried = saldoNow(tim, 'c');
+  assert.equal(carried, 10000, 'leaving the participant set does not erase her Saldo');
+
+  const rows = settlementRows(tim, findPeriode(tim, 'p2'));
+  assert.deepEqual(
+    rows.map((row) => row.memberId).sort(),
+    ['a', 'h'],
+    'the Settlement of a Periode must never name a non-participant'
+  );
+  assert.equal(currentBalances(tim).length, 4, 'the Tim still carries her roster row');
+  assert.equal(currentBalances(tim).find((r) => r.memberId === 'c').saldo, 10000);
+});
+
+test('a member outside the participant set cannot deposit until added back', () => {
+  let tim = makeTim();
+  tim = ok(setParticipants(tim, 'p1', ['h', 'a']));
+
+  const refused = addSetoran(tim, 'p1', { id: 's1', memberId: 'c', amount: 5000 }, NOW);
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, 'SETORAN_NOT_PARTICIPANT');
+  assert.match(refused.message, /bukan peserta periode berjalan/i);
+
+  tim = ok(setParticipants(tim, 'p1', ['h', 'a', 'c']));
+  const accepted = addSetoran(tim, 'p1', { id: 's1', memberId: 'c', amount: 5000 }, NOW);
+  assert.equal(accepted.ok, true);
+  assert.equal(setoranTotal(findPeriode(accepted.tim, 'p1'), 'c'), 5000);
+});

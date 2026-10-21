@@ -182,7 +182,12 @@ export function makePeriode({ id, label, openedAt, participants }) {
  * ------------------------------------------------------------------ */
 
 export function itemsSubtotal(items) {
-  return (items || []).reduce((sum, item) => sum + rupiah(item.qty) * rupiah(item.price), 0);
+  return (items || []).reduce((sum, item) => sum + itemLineTotal(item), 0);
+}
+
+/** One line's money. The UI must never multiply qty by price itself. */
+export function itemLineTotal(item) {
+  return rupiah(item.qty) * rupiah(item.price);
 }
 
 export function notaGrandTotal(nota) {
@@ -222,7 +227,7 @@ export function notaBreakdown(nota, tim) {
   for (const item of items) {
     const assigned = item.assignedTo || [];
     if (assigned.length === 0) continue;
-    const share = (rupiah(item.qty) * rupiah(item.price)) / assigned.length;
+    const share = itemLineTotal(item) / assigned.length;
     for (const memberId of assigned) {
       shareByMember.set(memberId, (shareByMember.get(memberId) || 0) + share);
     }
@@ -328,29 +333,23 @@ export function saldoNow(tim, memberId) {
  */
 export function settlementRows(tim, periode) {
   const index = periodeIndex(tim, periode.id);
+  // Participants only: the Settlement of a Periode never names a
+  // non-participant, not even one carrying a Saldo (ADR-0014).
   const participants = participantsOf(tim, periode);
-  // A member outside the participant set but still carrying a running Saldo
-  // (ADR-0015: a debt survives leaving) is listed rather than orphaned. A
-  // non-participant at Rp0 is never listed.
-  const outside = (tim.members || []).filter(
-    (m) => !participants.includes(m) && saldoAt(tim, index, m.id) !== 0
-  );
 
   if (periode.status === 'closed' && periode.snapshot) {
     const snapshot = periode.snapshot;
     const reDerived = Boolean(periode.reDerivedAt);
-    return [...participants, ...outside].map((member) => {
-      const stored = (snapshot.rows || []).find((row) => row.memberId === member.id);
-      const outsideParticipant = !participants.includes(member);
-      const konsumsiValue = stored ? rupiah(stored.konsumsi) : outsideParticipant ? konsumsi(tim, periode, member.id) : 0;
-      const kontribusiValue = stored ? rupiah(stored.kontribusi) : outsideParticipant ? kontribusi(tim, periode, member.id) : 0;
-      const awal = reDerived || !stored ? saldoAwal(tim, index, member.id) : rupiah(stored.saldoAwal);
+    return participants.map((member) => {
+      const stored = (snapshot.rows || []).find((row) => row.memberId === member.id) || {};
+      const konsumsiValue = rupiah(stored.konsumsi);
+      const kontribusiValue = rupiah(stored.kontribusi);
+      const awal = reDerived ? saldoAwal(tim, index, member.id) : rupiah(stored.saldoAwal);
       return {
         memberId: member.id,
         name: member.name,
         status: member.status,
         isHolder: member.id === tim.holderId,
-        outsideParticipants: outsideParticipant,
         saldoAwal: awal,
         konsumsi: konsumsiValue,
         kontribusi: kontribusiValue,
@@ -363,12 +362,11 @@ export function settlementRows(tim, periode) {
     });
   }
 
-  return [...participants, ...outside].map((member) => ({
+  return participants.map((member) => ({
     memberId: member.id,
     name: member.name,
     status: member.status,
     isHolder: member.id === tim.holderId,
-    outsideParticipants: !participants.includes(member),
     saldoAwal: saldoAwal(tim, index, member.id),
     konsumsi: konsumsi(tim, periode, member.id),
     kontribusi: kontribusi(tim, periode, member.id),
@@ -636,21 +634,15 @@ export function addSetoran(tim, periodeId, setoran, now) {
   const member = findAnggota(tim, setoran.memberId);
   if (!member) return fail('SETORAN_NOT_MEMBER', 'Anggota tidak ada di roster Tim ini.');
 
-  const index = periodeIndex(tim, periodeId);
-  if (!(periode.participants || []).includes(setoran.memberId) && saldoAt(tim, index, setoran.memberId) === 0) {
-    return fail('SETORAN_NOT_PARTICIPANT', 'Anggota ini bukan peserta periode berjalan.');
+  if (!(periode.participants || []).includes(setoran.memberId)) {
+    return fail(
+      'SETORAN_NOT_PARTICIPANT',
+      'Anggota ini bukan peserta periode berjalan. Tambahkan dia sebagai peserta dulu untuk mencatat Setoran atau Pengembalian.'
+    );
   }
 
   const next = clone(tim);
-  const target = findPeriode(next, periodeId);
-  // Settling an old debt is an ordinary Setoran in the current Periode
-  // (ADR-0013). A keluar Anggota carrying a Saldo is carried back into the
-  // participant set here so the movement and the Saldo stay visible and are
-  // never orphaned (ADR-0015).
-  if (!(target.participants || []).includes(setoran.memberId)) {
-    target.participants.push(setoran.memberId);
-  }
-  target.deposits.push({
+  findPeriode(next, periodeId).deposits.push({
     id: setoran.id,
     memberId: setoran.memberId,
     amount,

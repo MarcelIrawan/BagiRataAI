@@ -14,7 +14,6 @@ import {
   cascadePreview,
   closePeriode,
   createTim,
-  currentBalances,
   currentIndex,
   deleteTim,
   findAnggota,
@@ -22,10 +21,11 @@ import {
   findTim,
   handEnteredOpening,
   handoverHolder,
+  holderAt,
   holderNet,
   holderNetAt,
   isHolder,
-  itemsSubtotal,
+  itemLineTotal,
   kas,
   konsumsi,
   makePeriode,
@@ -40,10 +40,8 @@ import {
   participantsOf,
   periodeIndex,
   removeNota,
-  removeSetoran,
   reopenPeriode,
   rupiah,
-  saldoAt,
   saldoNow,
   setAnggotaStatus,
   setParticipants,
@@ -63,6 +61,7 @@ import {
   fromDateInputValue,
   periodeLabel as labelOf,
   toDateInputValue,
+  whatsappSafe,
 } from './format.js';
 
 import { nowIso, uid } from './ids.js';
@@ -231,11 +230,6 @@ function openSettlement() {
  * Home
  * ------------------------------------------------------------------ */
 
-function runningPosition(tim) {
-  const balances = currentBalances(tim).filter((row) => !row.isHolder);
-  return balances.reduce((sum, row) => sum + Math.abs(row.saldo), 0);
-}
-
 function renderHome() {
   store = loadStore();
   const tims = store.tims.filter((t) => !t.archivedAt);
@@ -250,7 +244,7 @@ function renderHome() {
       .map((tim) => {
         const holder = findAnggota(tim, tim.holderId);
         const open = openPeriodeOf(tim);
-        const position = runningPosition(tim);
+        const net = holderNet(tim);
         const notaCount = (tim.periods || []).reduce((sum, p) => sum + (p.bills || []).length, 0);
         return `
           <button onclick="openTim('${tim.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
@@ -261,7 +255,7 @@ function renderHome() {
               </p>
               <p class="text-[11px] mt-1 ${open ? 'text-emerald-700' : 'text-[#9C6F44]'}">
                 ${open ? 'Periode terbuka · ' + escapeHtml(labelOf(open, periodeIndex(tim, open.id))) : 'Tidak ada periode terbuka (idle)'}
-                ${position !== 0 ? ` · posisi berjalan ${formatRupiah(position)}` : ''}
+                ${net !== 0 ? ` · Holder Net ${formatRupiah(net)}` : ''}
               </p>
             </div>
             <i data-lucide="chevron-right" class="w-5 h-5 text-[#6F4E37] shrink-0"></i>
@@ -278,15 +272,15 @@ function renderHome() {
     archivedList.innerHTML = archived
       .map((tim) => {
         const holder = findAnggota(tim, tim.holderId);
-        const position = runningPosition(tim);
+        const { owed, credit } = outstandingAt(tim, currentIndex(tim));
         return `
           <button onclick="openTim('${tim.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
             <div class="min-w-0">
               <p class="font-bold text-[#3D312A] truncate">${escapeHtml(tim.name)}</p>
               <p class="text-xs text-[#9C6F44] mt-0.5">Holder: ${escapeHtml(holder ? holder.name : '-')} · ${tim.periods.length} periode</p>
               ${
-                position !== 0
-                  ? `<p class="text-[11px] font-semibold text-amber-800 mt-1">Saldo berjalan belum nol: ${formatRupiah(position)}</p>`
+                owed !== 0 || credit !== 0
+                  ? `<p class="text-[11px] font-semibold text-amber-800 mt-1">Saldo berjalan belum nol — ditagih ${formatRupiah(owed)}${credit !== 0 ? ` · kredit ${formatRupiah(credit)}` : ''}</p>`
                   : '<p class="text-[11px] text-[#9C6F44] mt-1">Tidak ada saldo berjalan.</p>'
               }
             </div>
@@ -415,6 +409,7 @@ function renderTim() {
     .map((member) => {
       const color = colorOf(member.colorIndex);
       const saldo = saldoNow(tim, member.id);
+      const saldoClass = saldo > 0 ? 'text-amber-800' : saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
       const isCurrentHolder = isHolder(tim, member.id);
       const statusLabel = member.status === 'keluar' ? 'keluar' : '';
       return `
@@ -425,7 +420,7 @@ function renderTim() {
             ${statusLabel ? `<span class="text-[10px] font-semibold uppercase text-amber-700">${statusLabel}${member.leftAt ? ' · ' + formatDate(member.leftAt) : ''}</span>` : ''}
           </div>
           <div class="flex items-center gap-2">
-            <span class="text-xs font-semibold ${saldo > 0 ? 'text-amber-800' : saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]'}">${formatRupiah(saldo)}</span>
+            <span class="text-xs font-semibold ${saldoClass}">${isCurrentHolder ? 'posisi ' : ''}${formatRupiah(saldo)}</span>
             ${
               isCurrentHolder
                 ? ''
@@ -444,25 +439,29 @@ function renderTim() {
     ? candidates.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')
     : '<option value="">Tidak ada anggota lain yang aktif</option>';
 
+  // The log answers "who was holding the cash on a given date"; the last line
+  // is the same question asked of "now", derived from the log rather than from
+  // the stored role.
+  const holderFromLog = findAnggota(tim, holderAt(tim, null));
+  const logLines = [...tim.handovers]
+    .reverse()
+    .map((event) => {
+      const from = findAnggota(tim, event.fromId);
+      const to = findAnggota(tim, event.toId);
+      return `
+        <div class="text-[11px] text-[#3D312A] py-1 border-b border-[#E6CCB2]/40">
+          ${formatDateTime(event.at)} · ${escapeHtml(from ? from.name : '-')} → ${escapeHtml(to ? to.name : '-')}
+          ${event.note ? `<span class="block text-[#9C6F44]">${escapeHtml(event.note)}</span>` : ''}
+        </div>`;
+    })
+    .join('');
+
   const log = $('handoverLog');
-  if (tim.handovers.length === 0) {
-    log.innerHTML = '<p class="text-[11px] text-[#9C6F44] italic">Belum ada serah terima. Holder pertama: ' + escapeHtml(holder ? holder.name : '-') + '.</p>';
-  } else {
-    log.innerHTML =
-      '<p class="text-[10px] font-semibold uppercase tracking-wide text-[#9C6F44]">Riwayat serah terima</p>' +
-      [...tim.handovers]
-        .reverse()
-        .map((event) => {
-          const from = findAnggota(tim, event.fromId);
-          const to = findAnggota(tim, event.toId);
-          return `
-            <div class="text-[11px] text-[#3D312A] py-1 border-b border-[#E6CCB2]/40">
-              ${formatDateTime(event.at)} · ${escapeHtml(from ? from.name : '-')} → ${escapeHtml(to ? to.name : '-')}
-              ${event.note ? `<span class="block text-[#9C6F44]">${escapeHtml(event.note)}</span>` : ''}
-            </div>`;
-        })
-        .join('');
-  }
+  log.innerHTML =
+    (tim.handovers.length === 0
+      ? `<p class="text-[11px] text-[#9C6F44] italic">Belum ada serah terima. Holder pertama: ${escapeHtml(holder ? holder.name : '-')}.</p>`
+      : `<p class="text-[10px] font-semibold uppercase tracking-wide text-[#9C6F44]">Riwayat serah terima</p>${logLines}`) +
+    `<p class="text-[11px] font-semibold text-[#3D312A] pt-1">Holder sekarang menurut log: ${escapeHtml(holderFromLog ? holderFromLog.name : '-')}</p>`;
 
   // One open Periode at a time: the new-Periode form only appears when idle.
   $('openPeriodeForm').classList.toggle('hidden', Boolean(openPeriodeOf(tim)));
@@ -472,8 +471,9 @@ function renderTim() {
   $('periodeList').innerHTML = periods
     .map((periode) => {
       const index = periodeIndex(tim, periode.id);
-      const rows = settlementRows(tim, periode).filter((row) => !row.isHolder);
-      const position = rows.reduce((sum, row) => sum + Math.abs(row.saldo), 0);
+      // A closed Periode's figure is its snapshot, never the current position.
+      const net = holderNetAt(tim, index);
+      const netLabel = periode.status === 'closed' ? 'Holder Net saat ditutup' : 'Holder Net berjalan';
       const badge =
         periode.status === 'open'
           ? '<span class="text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full">Terbuka</span>'
@@ -486,7 +486,7 @@ function renderTim() {
               dibuka ${formatDate(periode.openedAt)}${periode.closedAt ? ' · ditutup ' + formatDate(periode.closedAt) : ''} · ${(periode.bills || []).length} nota · ${(periode.deposits || []).length} setoran
               ${periode.reDerivedAt ? ' · dihitung ulang ' + formatDate(periode.reDerivedAt) : ''}
             </p>
-            ${position !== 0 ? `<p class="text-[11px] text-[#6F4E37] mt-0.5">posisi berjalan ${formatRupiah(position)}</p>` : ''}
+            ${net !== 0 ? `<p class="text-[11px] text-[#6F4E37] mt-0.5">${netLabel} ${formatRupiah(net)}</p>` : ''}
           </div>
           ${badge}
         </button>`;
@@ -513,7 +513,8 @@ function markAnggotaKeluar(memberId) {
   if (!result.ok) {
     return showModal({
       title: 'Tidak bisa menandai keluar',
-      body: `<p>${escapeHtml(result.message)}</p>`,
+      // The domain states the reason; the app boundary formats the rupiah.
+      body: `<p>${escapeHtml(readableRefusal(result))}</p>`,
       confirmLabel: 'Mengerti',
     });
   }
@@ -620,10 +621,11 @@ function openNewPeriode() {
  * Periode screen
  * ------------------------------------------------------------------ */
 
-function setoranParticipants(tim) {
-  // Every roster member except the Holder may deposit. A keluar member with a
-  // running Saldo stays settleable (ADR-0015).
-  return tim.members.filter((m) => m.id !== tim.holderId);
+function setoranParticipants(tim, periode) {
+  // Setoran is between the Holder and a participant of this Periode. A keluar
+  // Anggota carrying a Saldo is settled by adding them back as a participant
+  // first (ADR-0014 keeps the participant set as the single gate).
+  return participantsOf(tim, periode).filter((m) => m.id !== tim.holderId);
 }
 
 function renderPeriode() {
@@ -708,7 +710,7 @@ function renderPeriode() {
   const candidates = setoranParticipants(tim, periode);
   $('setoranMemberSelect').innerHTML = candidates.length
     ? candidates.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')
-    : '<option value="">Tidak ada anggota non-Holder</option>';
+    : '<option value="">Tidak ada peserta non-Holder</option>';
   $('setoranForm').classList.toggle('hidden', !isOpen);
 
   const deposits = [...(periode.deposits || [])].sort((a, b) => String(b.at).localeCompare(String(a.at)));
@@ -727,7 +729,6 @@ function renderPeriode() {
                 </div>
                 <div class="flex items-center gap-1 shrink-0">
                   <span class="font-semibold ${negative ? 'text-red-700' : 'text-emerald-700'}">${formatSignedRupiah(deposit.amount)}</span>
-                  ${isOpen ? `<button onclick="removeSetoranFromPeriode('${deposit.id}')" class="text-[#9C6F44] hover:text-red-600"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>` : ''}
                 </div>
               </div>`;
           })
@@ -841,13 +842,6 @@ function addSetoran() {
   render();
 }
 
-function removeSetoranFromPeriode(setoranId) {
-  const result = removeSetoran(currentTim(), activePeriodeId, setoranId);
-  if (!result.ok) return showModal({ title: 'Tidak bisa menghapus', body: `<p>${escapeHtml(result.message)}</p>` });
-  commitTim(result.tim);
-  render();
-}
-
 function removeNotaFromPeriode(notaId) {
   const tim = currentTim();
   const nota = (currentPeriode().bills || []).find((b) => b.id === notaId);
@@ -869,13 +863,13 @@ function confirmClosePeriode() {
   const tim = currentTim();
   const periode = currentPeriode();
   const rows = settlementRows(tim, periode);
-  const total = rows.reduce((sum, row) => sum + row.saldo, 0);
+  const net = holderNetAt(tim, periodeIndex(tim, periode.id));
   showModal({
     title: 'Tutup Periode',
     body: `
       <p>Snapshot Settlement akan disimpan: ${rows.length} peserta, ${(periode.bills || []).length} nota.</p>
       <p>Setelah ditutup, nota dan setoran tidak bisa diubah sampai periode dibuka kembali.</p>
-      <p class="text-xs text-[#9C6F44]">Total saldo berjalan peserta saat ini ${formatRupiah(total)}. Tidak ada syarat "harus balance".</p>`,
+      <p class="text-xs text-[#9C6F44]">Holder Net saat ini ${formatRupiah(net)}. Tidak ada syarat "harus balance".</p>`,
     confirmLabel: 'Tutup periode',
     onConfirm: () => {
       const result = closePeriode(currentTim(), periode.id, nowIso());
@@ -944,12 +938,9 @@ function renderSettlement() {
     .map((row) => {
       const color = colorOf((findAnggota(tim, row.memberId) || {}).colorIndex);
       const saldoClass = row.saldo > 0 ? 'text-amber-800' : row.saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
+      // The Holder's sign is a position, not a debt: never present it as a Saldo.
       const saldoLabel = row.isHolder
-        ? row.saldo < 0
-          ? 'Posisi Holder · lebih bayar'
-          : row.saldo > 0
-            ? 'Posisi Holder · menahan uang'
-            : 'Posisi Holder · pas'
+        ? 'Posisi Holder · bukan utang'
         : row.saldo > 0
           ? `Utang ke ${escapeHtml(holder ? holder.name : 'Holder')}`
           : row.saldo < 0
@@ -972,7 +963,7 @@ function renderSettlement() {
             <div><span class="text-[#9C6F44] block">Saldo Awal</span><span class="font-semibold">${formatRupiah(row.saldoAwal)}</span>${row.handEnteredAwal ? '<span class="block text-[9px] text-amber-700">diisi manual</span>' : ''}</div>
             <div><span class="text-[#9C6F44] block">Konsumsi</span><span class="font-semibold">${formatRupiah(row.konsumsi)}</span></div>
             <div><span class="text-[#9C6F44] block">Kontribusi</span><span class="font-semibold">${formatRupiah(row.kontribusi)}</span></div>
-            <div><span class="text-[#9C6F44] block">Saldo berjalan</span><span class="font-semibold ${saldoClass}">${formatRupiah(row.saldo)}</span></div>
+            <div><span class="text-[#9C6F44] block">${row.isHolder ? 'Posisi Holder' : 'Saldo berjalan'}</span><span class="font-semibold ${saldoClass}">${formatRupiah(row.saldo)}</span></div>
           </div>
         </div>`;
     })
@@ -1009,7 +1000,7 @@ function renderSettlement() {
     <div class="bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4">
       <p class="text-[10px] font-semibold uppercase tracking-wider text-[#9C6F44]">Kas Holder — uang yang dipegang</p>
       <p class="text-lg font-bold text-[#3D312A]">${formatRupiah(kas(tim))}</p>
-      <p class="text-[10px] text-[#9C6F44]">Tim-wide, tidak reset per periode. Angka terpisah dari Holder Net — jangan dijumlahkan.</p>
+      <p class="text-[10px] text-[#9C6F44]">Tim-wide, tidak reset per periode. Cocokkan dengan uang fisik di dompet — ini petunjuk rekonsiliasi, bukan error. Angka terpisah dari Holder Net.</p>
     </div>`;
 }
 
@@ -1020,19 +1011,21 @@ function copySettlementWA() {
   const index = periodeIndex(tim, periode.id);
   const rows = settlementRows(tim, periode);
   const holder = findAnggota(tim, tim.holderId);
-  const holderName = holder ? holder.name : 'Holder';
+  const holderName = whatsappSafe(holder ? holder.name : 'Holder');
   const isClosed = periode.status === 'closed';
   const transfers = minimalTransfers(rows);
 
-  let text = `📒 *SETTLEMENT — ${tim.name}*\n`;
-  text += `Periode: ${labelOf(periode, index)}${isClosed ? ` (snapshot ${formatDate(periode.closedAt)})` : ' (pratinjau)'}\n`;
+  // WhatsApp renders plain text, so free text is stripped of line breaks and
+  // emphasis markers rather than HTML-escaped (which would print literally).
+  let text = `📒 *SETTLEMENT — ${whatsappSafe(tim.name)}*\n`;
+  text += `Periode: ${whatsappSafe(labelOf(periode, index))}${isClosed ? ` (snapshot ${formatDate(periode.closedAt)})` : ' (pratinjau)'}\n`;
   text += `Holder: *${holderName}*\n`;
   text += '-----------------------------------------\n';
 
   for (const row of rows) {
     if (row.isHolder) continue;
     const label = row.saldo > 0 ? `utang ke ${holderName}` : row.saldo < 0 ? `kredit dari ${holderName}` : 'lunas';
-    text += `👤 *${row.name}*\n`;
+    text += `👤 *${whatsappSafe(row.name)}*\n`;
     text += `   Saldo awal ${formatRupiah(row.saldoAwal)} · konsumsi ${formatRupiah(row.konsumsi)} · kontribusi ${formatRupiah(row.kontribusi)}\n`;
     text += `   *Saldo berjalan: ${formatRupiah(row.saldo)} (${label})*\n`;
     text += '-----------------------------------------\n';
@@ -1051,7 +1044,7 @@ function copySettlementWA() {
     for (const transfer of transfers) {
       const from = findAnggota(tim, transfer.fromId);
       const to = findAnggota(tim, transfer.toId);
-      text += `   ${from ? from.name : '?'} → ${to ? to.name : '?'}: ${formatRupiah(transfer.amount)}\n`;
+      text += `   ${whatsappSafe(from ? from.name : '?')} → ${whatsappSafe(to ? to.name : '?')}: ${formatRupiah(transfer.amount)}\n`;
     }
   }
 
@@ -1176,8 +1169,8 @@ function draftChange(field, value) {
   else if (field === 'occurredAt') draft.nota.occurredAt = value || draft.nota.occurredAt;
   else draft.nota[field] = value;
 
-  if (field === 'merchant' || field === 'occurredAt') {
-    // No structural change: totals and payers are untouched.
+  if (field === 'merchant') {
+    // Cosmetic only: totals, payers and the back-date badge are unaffected.
     renderEditorSummary();
     return;
   }
@@ -1232,7 +1225,7 @@ function renderItems() {
                 <button onclick="updateItem('${item.id}', 'qty', ${item.qty + 1})" class="px-2 py-0.5 text-xs text-[#6F4E37] hover:bg-[#F3ECE0] rounded-r-lg font-bold">+</button>
               </div>
               <input type="number" value="${item.price}" onchange="updateItem('${item.id}', 'price', this.value)" class="w-24 px-2 py-1 text-right text-xs font-semibold bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg focus:outline-none focus:border-[#6F4E37]">
-              <span class="text-xs font-bold text-[#3D312A] w-24 text-right">${formatRupiah(item.qty * item.price)}</span>
+              <span class="text-xs font-bold text-[#3D312A] w-24 text-right">${formatRupiah(itemLineTotal(item))}</span>
               <button onclick="removeItem('${item.id}')" class="text-[#9C6F44] hover:text-red-600 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
             </div>
           </div>
@@ -1702,6 +1695,18 @@ function loadSampleReceipt() {
   };
   ensureDraftForParsed();
   if (!draft) return goHome();
+  // A one-off split has no roster yet: the sample needs people to be splittable.
+  if (oneOff && editorTim().members.length === 0) {
+    ['Andi', 'Budi', 'Citra'].forEach((name, index) => {
+      const tim = editorTim();
+      const result = addAnggota(tim, { id: uid('m'), name, colorIndex: index }, nowIso());
+      if (result.ok) {
+        let next = result.tim;
+        if (!next.holderId) next = { ...next, holderId: next.members[next.members.length - 1].id };
+        oneOff.tim = next;
+      }
+    });
+  }
   populateParsedData(sample);
   showToast('Contoh nota dimuat.');
 }
@@ -1709,6 +1714,13 @@ function loadSampleReceipt() {
 /* ------------------------------------------------------------------ *
  * Modal, toast, clipboard
  * ------------------------------------------------------------------ */
+
+/** The domain states the reason; money in it is formatted at this boundary. */
+function readableRefusal(result) {
+  const saldo = result.details?.saldo;
+  if (typeof saldo !== 'number') return result.message;
+  return result.message.replace(String(Math.abs(saldo)), formatRupiah(Math.abs(saldo)));
+}
 
 function showModal({ title, body, confirmLabel = null, onConfirm = null, danger = false }) {
   $('modalTitle').textContent = title;
@@ -1807,7 +1819,6 @@ Object.assign(window, {
   saveParticipants,
   handleSetSaldoAwal,
   addSetoran,
-  removeSetoranFromPeriode,
   removeNotaFromPeriode,
   confirmClosePeriode,
   confirmReopenPeriode,
