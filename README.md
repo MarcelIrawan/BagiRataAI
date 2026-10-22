@@ -27,7 +27,7 @@ Aplikasi split bill berbasis AI (foto nota) dengan dua mode:
 npm test
 ```
 
-Node built-in test runner, tanpa dependency. Test hanya menyentuh `js/domain.js`: Nota math, Settlement, siklus Periode/Anggota, dan migrasi.
+Node built-in test runner, tanpa dependency. Test menyentuh `js/domain.js` (Nota math, Settlement, siklus Periode/Anggota, migrasi) dan `netlify/functions/analyze-receipt.js` (kontrak HTTP handler).
 
 ## Model uang
 

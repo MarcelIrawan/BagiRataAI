@@ -1,5 +1,7 @@
 // netlify/functions/analyze-receipt.js
-exports.handler = async function(event, context) {
+// ESM: package.json declares "type": "module", so Netlify loads this file as an
+// ES module. Netlify reads the named export `handler`.
+export const handler = async function(event, context) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
