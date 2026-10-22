@@ -38,22 +38,26 @@
 <body class="min-h-full flex flex-col justify-between text-[#3D312A]">
 
     <header class="bg-[#FDFBF7] border-b border-[#E6CCB2] sticky top-0 z-30 shadow-sm">
-        <div class="max-w-5xl mx-auto px-4 py-3.5 flex items-center justify-between">
+        <div class="max-w-5xl mx-auto px-4 py-3.5 flex items-center justify-between gap-3">
             <button onclick="goHome()" class="flex items-center space-x-3 text-left">
                 <div class="w-10 h-10 rounded-xl bg-[#6F4E37] flex items-center justify-center text-[#FDFBF7] shadow-md shadow-espresso-900/10">
                     <i data-lucide="receipt" class="w-5 h-5"></i>
                 </div>
                 <div>
                     <h1 class="font-bold text-lg text-[#3D312A] leading-none">BagiRata<span class="text-[#D4A373]">.ai</span></h1>
-                    <p class="text-xs text-[#9C6F44] font-medium mt-0.5">Split Bill Nota Praktis & Adil</p>
+                    <p class="text-xs text-[#9C6F44] font-medium mt-0.5">Split Bill Nota Praktis &amp; Adil</p>
                 </div>
             </button>
             <div class="flex items-center gap-2">
-                <button id="headerHomeBtn" onclick="goHome()" class="hidden text-xs font-semibold text-[#6F4E37] hover:text-[#3D312A] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg transition flex items-center gap-1.5 border border-[#E6CCB2]">
+                <button id="headerBackBtn" onclick="goBack()" class="hidden text-xs font-semibold text-[#6F4E37] hover:text-[#3D312A] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg transition items-center gap-1.5 border border-[#E6CCB2]">
+                    <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+                    <span>Kembali</span>
+                </button>
+                <button id="headerHomeBtn" onclick="goHome()" class="hidden text-xs font-semibold text-[#6F4E37] hover:text-[#3D312A] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg transition items-center gap-1.5 border border-[#E6CCB2]">
                     <i data-lucide="home" class="w-3.5 h-3.5"></i>
                     <span>Beranda</span>
                 </button>
-                <button id="headerResetBtn" onclick="confirmResetData()" class="hidden text-xs font-semibold text-[#6F4E37] hover:text-[#3D312A] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg transition flex items-center gap-1.5 border border-[#E6CCB2]">
+                <button id="headerResetBtn" onclick="confirmResetDraft()" class="hidden text-xs font-semibold text-[#6F4E37] hover:text-[#3D312A] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg transition items-center gap-1.5 border border-[#E6CCB2]">
                     <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
                     <span>Reset</span>
                 </button>
@@ -67,15 +71,15 @@
         <section id="homeSection" class="space-y-6">
             <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-6 shadow-sm text-center space-y-3">
                 <h2 class="text-xl font-bold text-[#3D312A]">Mulai Split Bill</h2>
-                <p class="text-sm text-[#9C6F44] max-w-md mx-auto">Pilih mode sekali pakai, atau buat tim periode dengan pemegang dana untuk banyak nota sekaligus.</p>
+                <p class="text-sm text-[#9C6F44] max-w-md mx-auto">Pilih mode sekali pakai untuk satu nota, atau buat Tim untuk kelompok yang makan bersama berulang kali.</p>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 max-w-lg mx-auto">
                     <button onclick="startOneTime()" class="bg-[#6F4E37] text-[#FDFBF7] font-semibold text-sm px-4 py-3.5 rounded-xl hover:bg-[#5C3D2E] transition shadow-sm flex flex-col items-center gap-1.5">
                         <i data-lucide="zap" class="w-5 h-5"></i>
                         Sekali Pakai
                     </button>
-                    <button onclick="startCreateTeam()" class="bg-[#D4A373] text-[#3D312A] font-semibold text-sm px-4 py-3.5 rounded-xl hover:bg-[#B98B5E] hover:text-[#FDFBF7] transition shadow-sm flex flex-col items-center gap-1.5">
+                    <button onclick="startCreateTim()" class="bg-[#D4A373] text-[#3D312A] font-semibold text-sm px-4 py-3.5 rounded-xl hover:bg-[#B98B5E] hover:text-[#FDFBF7] transition shadow-sm flex flex-col items-center gap-1.5">
                         <i data-lucide="users" class="w-5 h-5"></i>
-                        Tim Periode Baru
+                        Tim Baru
                     </button>
                 </div>
             </div>
@@ -83,29 +87,30 @@
             <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
                 <h3 class="font-bold text-[#3D312A] flex items-center gap-2">
                     <i data-lucide="folder-open" class="w-4 h-4 text-[#6F4E37]"></i>
-                    Tim Aktif
+                    Tim
                 </h3>
-                <div id="openTeamsList" class="space-y-2"></div>
+                <div id="timsList" class="space-y-2"></div>
             </div>
 
             <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
                 <h3 class="font-bold text-[#3D312A] flex items-center gap-2">
                     <i data-lucide="archive" class="w-4 h-4 text-[#6F4E37]"></i>
-                    Riwayat Periode
+                    Diarsipkan
+                    <span id="archivedCount" class="text-[10px] font-semibold uppercase tracking-wide bg-[#F3ECE0] text-[#6F4E37] px-2 py-0.5 rounded-full"></span>
                 </h3>
-                <div id="closedTeamsList" class="space-y-2"></div>
+                <div id="archivedTimsList" class="space-y-2"></div>
             </div>
         </section>
 
-        <!-- CREATE TEAM -->
-        <section id="createTeamSection" class="hidden bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-6 shadow-sm space-y-5 max-w-xl mx-auto">
+        <!-- CREATE TIM -->
+        <section id="createTimSection" class="hidden bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-6 shadow-sm space-y-5 max-w-xl mx-auto">
             <div>
-                <h2 class="text-xl font-bold text-[#3D312A]">Buat Tim Periode</h2>
-                <p class="text-sm text-[#9C6F44] mt-1">Tetapkan anggota dan satu pemegang dana sebelum menambah nota.</p>
+                <h2 class="text-xl font-bold text-[#3D312A]">Buat Tim</h2>
+                <p class="text-sm text-[#9C6F44] mt-1">Tim menyimpan roster, Holder, dan semua periode. Periode pertama dibuat otomatis.</p>
             </div>
             <div>
-                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Nama Tim / Periode</label>
-                <input type="text" id="teamNameInput" placeholder="misal: Trip Bandung Maret" class="w-full px-3.5 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
+                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Nama Tim</label>
+                <input type="text" id="teamNameInput" placeholder="misal: Tim Kantor Lantai 3" class="w-full px-3.5 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
             </div>
             <div>
                 <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Anggota</label>
@@ -118,81 +123,167 @@
                 <div id="draftMembersList" class="flex flex-wrap gap-2 pt-3"></div>
             </div>
             <div>
-                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Pemegang Dana (Holder)</label>
+                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Holder (Pemegang Dana)</label>
                 <select id="holderSelect" class="w-full px-3.5 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]"></select>
-                <p class="text-[11px] text-[#9C6F44] mt-1">Holder membayar transaksi; anggota bisa setor dana kepadanya.</p>
+                <p class="text-[11px] text-[#9C6F44] mt-1">Holder adalah satu-satunya pihak yang ditransfer anggota lain.</p>
             </div>
-            <button onclick="confirmCreateTeam()" class="w-full bg-[#6F4E37] text-[#FDFBF7] font-semibold text-sm py-3 rounded-xl hover:bg-[#5C3D2E] transition">Mulai Periode</button>
+            <button onclick="confirmCreateTim()" class="w-full bg-[#6F4E37] text-[#FDFBF7] font-semibold text-sm py-3 rounded-xl hover:bg-[#5C3D2E] transition">Buat Tim &amp; Periode Pertama</button>
         </section>
 
-        <!-- TEAM HUB -->
-        <section id="teamHubSection" class="hidden space-y-5">
+        <!-- TIM -->
+        <section id="timSection" class="hidden space-y-5">
             <div class="bg-[#FDFBF7] border border-[#E6CCB2] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm">
                 <div>
-                    <h2 id="teamHubTitle" class="font-bold text-lg text-[#3D312A]">Tim</h2>
-                    <p id="teamHubSubtitle" class="text-xs text-[#9C6F44]"></p>
+                    <h2 id="timTitle" class="font-bold text-lg text-[#3D312A]">Tim</h2>
+                    <p id="timSubtitle" class="text-xs text-[#9C6F44]"></p>
                 </div>
-                <div class="flex flex-wrap gap-2">
-                    <button onclick="startNewTeamBill()" class="text-xs font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-2 rounded-lg transition flex items-center gap-1">
-                        <i data-lucide="plus" class="w-3.5 h-3.5"></i> Tambah Nota
-                    </button>
-                    <button onclick="confirmClosePeriod()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1">
-                        <i data-lucide="lock" class="w-3.5 h-3.5"></i> Tutup Periode
-                    </button>
-                </div>
+                <div id="timActionBar" class="flex flex-wrap gap-2"></div>
             </div>
 
-            <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
-                <h3 class="font-bold text-[#3D312A] text-sm">Anggota</h3>
-                <div id="teamMembersChips" class="flex flex-wrap gap-2"></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-1">
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-[#9C6F44]">Kas Holder</p>
+                    <p id="kasHolderValue" class="text-2xl font-bold text-[#3D312A]">Rp 0</p>
+                    <p id="kasHolderHint" class="text-[11px] text-[#9C6F44] leading-snug"></p>
+                </div>
+                <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-1">
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-[#9C6F44]">Holder Net — akan ditagih</p>
+                    <p id="holderNetValue" class="text-2xl font-bold text-[#6F4E37]">Rp 0</p>
+                    <p class="text-[11px] text-[#9C6F44] leading-snug">Angka terpisah dari Kas Holder. Jangan dijumlahkan: satu uang yang dipegang, satu lagi uang yang akan ditagih.</p>
+                </div>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
                     <h3 class="font-bold text-[#3D312A] text-sm flex items-center gap-2">
-                        <i data-lucide="receipt" class="w-4 h-4 text-[#6F4E37]"></i> Daftar Nota
+                        <i data-lucide="users" class="w-4 h-4 text-[#6F4E37]"></i> Anggota
                     </h3>
-                    <div id="teamBillsList" class="space-y-2"></div>
+                    <div id="rosterList" class="space-y-2"></div>
+                    <div class="flex gap-2 pt-1">
+                        <input type="text" id="addAnggotaInput" placeholder="Nama anggota baru..." onkeypress="if(event.key==='Enter') addAnggotaToTim()" class="flex-grow px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
+                        <button onclick="addAnggotaToTim()" class="bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-2 rounded-xl font-semibold text-xs transition">Tambah</button>
+                    </div>
+                    <p class="text-[11px] text-[#9C6F44]">Anggota yang ditambahkan saat periode berjalan langsung jadi peserta periode itu.</p>
+                </div>
+
+                <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
+                    <h3 class="font-bold text-[#3D312A] text-sm flex items-center gap-2">
+                        <i data-lucide="arrow-left-right" class="w-4 h-4 text-[#6F4E37]"></i> Serahkan Peran Holder
+                    </h3>
+                    <p class="text-[11px] text-[#9C6F44]">Cocokkan Kas Holder dengan uang fisik dulu. Saldo anggota tidak berubah saat peran diserahkan.</p>
+                    <p class="text-xs font-semibold text-[#3D312A]">Kas Holder sekarang: <span id="handoverKasValue" class="text-[#6F4E37]">Rp 0</span></p>
+                    <select id="handoverSelect" class="w-full px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]"></select>
+                    <input type="text" id="handoverNoteInput" placeholder="Catatan serah terima (opsional)" class="w-full px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
+                    <button onclick="confirmHandover()" class="w-full bg-[#D4A373] text-[#3D312A] font-semibold text-sm py-2 rounded-xl hover:bg-[#B98B5E] hover:text-[#FDFBF7] transition">Konfirmasi serah terima</button>
+                    <div id="handoverLog" class="pt-2 space-y-1"></div>
+                </div>
+            </div>
+
+            <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <h3 class="font-bold text-[#3D312A] text-sm flex items-center gap-2">
+                        <i data-lucide="calendar-range" class="w-4 h-4 text-[#6F4E37]"></i> Periode
+                    </h3>
+                    <div id="openPeriodeForm" class="flex gap-2">
+                        <input type="text" id="newPeriodeLabel" placeholder="Label (opsional)" class="w-40 px-3 py-1.5 bg-[#FAF6F0] border border-[#E6CCB2] rounded-lg text-xs focus:outline-none focus:border-[#6F4E37]">
+                        <button onclick="openNewPeriode()" class="text-xs font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-1.5 rounded-lg transition flex items-center gap-1">
+                            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Buka periode baru
+                        </button>
+                    </div>
+                </div>
+                <div id="periodeList" class="space-y-2"></div>
+            </div>
+        </section>
+
+        <!-- PERIODE -->
+        <section id="periodeSection" class="hidden space-y-5">
+            <div class="bg-[#FDFBF7] border border-[#E6CCB2] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm">
+                <div class="min-w-0">
+                    <p id="periodeBreadcrumb" class="text-[11px] font-semibold uppercase tracking-wider text-[#9C6F44]"></p>
+                    <h2 id="periodeTitle" class="font-bold text-lg text-[#3D312A] truncate">Periode</h2>
+                    <p id="periodeMeta" class="text-xs text-[#9C6F44]"></p>
+                </div>
+                <div id="periodeActions" class="flex flex-wrap gap-2"></div>
+            </div>
+
+            <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
+                <div class="flex items-center justify-between gap-2">
+                    <h3 class="font-bold text-[#3D312A] text-sm flex items-center gap-2">
+                        <i data-lucide="user-check" class="w-4 h-4 text-[#6F4E37]"></i> Peserta Periode
+                    </h3>
+                    <button id="saveParticipantsBtn" onclick="saveParticipants()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-1.5 rounded-lg border border-[#E6CCB2] transition">Simpan peserta</button>
+                </div>
+                <div id="participantsList" class="flex flex-wrap gap-2"></div>
+                <p id="participantHelper" class="text-[11px] text-[#9C6F44]"></p>
+            </div>
+
+            <div id="saldoAwalCard" class="hidden bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
+                <div>
+                    <h3 class="font-bold text-[#3D312A] text-sm flex items-center gap-2">
+                        <i data-lucide="history" class="w-4 h-4 text-[#6F4E37]"></i> Saldo Awal manual
+                    </h3>
+                    <p class="text-[11px] text-[#9C6F44]">Hanya untuk periode pertama Tim: utang yang terjadi sebelum memakai BagiRata. Periode berikutnya membaca otomatis dari snapshot periode sebelumnya. Kosongkan untuk nol.</p>
+                </div>
+                <div id="saldoAwalRows" class="space-y-2"></div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
+                    <div class="flex items-center justify-between gap-2">
+                        <h3 class="font-bold text-[#3D312A] text-sm flex items-center gap-2">
+                            <i data-lucide="receipt" class="w-4 h-4 text-[#6F4E37]"></i> Nota
+                            <span id="notaCount" class="text-[10px] font-semibold text-[#9C6F44]"></span>
+                        </h3>
+                        <button id="addNotaBtn" onclick="startManualNota()" class="text-xs font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-1.5 rounded-lg transition flex items-center gap-1">
+                            <i data-lucide="plus" class="w-3.5 h-3.5"></i> Nota
+                        </button>
+                    </div>
+                    <div id="notaList" class="space-y-2"></div>
                 </div>
 
                 <div class="space-y-5">
-                    <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
+                    <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-2">
                         <h3 class="font-bold text-[#3D312A] text-sm flex items-center gap-2">
-                            <i data-lucide="wallet" class="w-4 h-4 text-[#6F4E37]"></i> Saldo Berjalan vs Holder
+                            <i data-lucide="banknote" class="w-4 h-4 text-[#6F4E37]"></i> Setoran &amp; Pengembalian
                         </h3>
-                        <div id="liveBalancesList"></div>
+                        <div id="setoranForm" class="space-y-2">
+                            <select id="setoranMemberSelect" class="w-full px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]"></select>
+                            <input type="number" id="setoranAmount" placeholder="Jumlah (negatif = pengembalian)" class="w-full px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
+                            <input type="text" id="setoranNote" placeholder="Catatan (wajib untuk pengembalian)" class="w-full px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
+                            <button onclick="addSetoran()" class="w-full bg-[#D4A373] text-[#3D312A] font-semibold text-sm py-2 rounded-xl hover:bg-[#B98B5E] hover:text-[#FDFBF7] transition">Simpan Setoran</button>
+                        </div>
+                        <p class="text-[11px] text-[#9C6F44]">Setoran adalah uang antara Holder dan anggota lain. Holder tidak bisa jadi salah satu pihak.</p>
+                        <div id="setoranList" class="pt-2 space-y-1"></div>
                     </div>
 
-                    <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-3">
+                    <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-2">
                         <h3 class="font-bold text-[#3D312A] text-sm flex items-center gap-2">
-                            <i data-lucide="banknote" class="w-4 h-4 text-[#6F4E37]"></i> Catat Setoran
+                            <i data-lucide="wallet" class="w-4 h-4 text-[#6F4E37]"></i> Saldo berjalan
                         </h3>
-                        <div class="space-y-2">
-                            <select id="depositMemberSelect" class="w-full px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]"></select>
-                            <input type="number" id="depositAmountInput" placeholder="Jumlah (Rp)" class="w-full px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
-                            <input type="text" id="depositNoteInput" placeholder="Catatan (opsional)" class="w-full px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
-                            <button onclick="addDeposit()" class="w-full bg-[#D4A373] text-[#3D312A] font-semibold text-sm py-2 rounded-xl hover:bg-[#B98B5E] hover:text-[#FDFBF7] transition">Simpan Setoran</button>
-                        </div>
-                        <div id="depositsList" class="pt-2"></div>
+                        <div id="periodeBalances" class="space-y-1"></div>
+                        <p id="periodeKasNote" class="text-[11px] text-[#9C6F44] pt-1"></p>
                     </div>
                 </div>
             </div>
         </section>
 
         <!-- SETTLEMENT -->
-        <section id="settlementSection" class="hidden space-y-5 max-w-xl mx-auto">
+        <section id="settlementSection" class="hidden space-y-5 max-w-2xl mx-auto">
             <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-6 shadow-sm space-y-4">
                 <div class="flex items-start justify-between gap-3">
-                    <div>
-                        <h2 id="settlementTitle" class="text-xl font-bold text-[#3D312A]">Settlement</h2>
+                    <div class="min-w-0">
+                        <h2 id="settlementTitle" class="text-xl font-bold text-[#3D312A] truncate">Settlement</h2>
                         <p id="settlementSubtitle" class="text-xs text-[#9C6F44]"></p>
+                        <p id="settlementBadge" class="text-[11px] font-semibold text-[#6F4E37] mt-1"></p>
                     </div>
                     <button onclick="copySettlementWA()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-2.5 py-1.5 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1 shrink-0">
                         <i data-lucide="copy" class="w-3.5 h-3.5"></i> Salin ke WA
                     </button>
                 </div>
-                <div id="settlementList" class="space-y-3"></div>
-                <button onclick="goHome()" class="w-full text-sm font-semibold text-[#6F4E37] border border-[#E6CCB2] py-2.5 rounded-xl hover:bg-[#F3ECE0] transition">Kembali ke Beranda</button>
+                <div id="settlementRows" class="space-y-3"></div>
+                <div id="minimalTransfers"></div>
+                <div id="settlementMeta" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+                <button onclick="goBack()" class="w-full text-sm font-semibold text-[#6F4E37] border border-[#E6CCB2] py-2.5 rounded-xl hover:bg-[#F3ECE0] transition">Kembali</button>
             </div>
         </section>
 
@@ -202,48 +293,35 @@
                 <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-[#F3ECE0] text-[#6F4E37] mb-1">
                     <i data-lucide="sparkles" class="w-6 h-6"></i>
                 </div>
-                <h2 class="text-xl font-bold text-[#3D312A]">Unggah Foto Nota / Struk Pembayaran</h2>
-                <p class="text-sm text-[#9C6F44]">Foto nota kasir Anda dan biarkan AI memproses item, harga, pajak, hingga diskon secara otomatis.</p>
+                <h2 id="uploadTitle" class="text-xl font-bold text-[#3D312A]">Tambah Nota</h2>
+                <p id="uploadSubtitle" class="text-sm text-[#9C6F44]">Foto nota, unggah gambar, atau isi manual.</p>
 
-                <!-- Hidden file inputs -->
                 <input type="file" id="galleryInput" class="hidden" accept="image/*" onchange="handleFileSelect(event)">
-                <input type="file" id="fileInput" class="hidden" accept="image/*" onchange="handleFileSelect(event)">
 
-                <!-- Camera & Gallery buttons -->
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <button onclick="openCamera()" class="bg-[#6F4E37] text-[#FDFBF7] font-semibold text-sm px-4 py-5 rounded-xl hover:bg-[#5C3D2E] transition shadow-sm flex flex-col items-center gap-2 group">
                         <div class="w-12 h-12 rounded-full bg-[#FDFBF7]/20 group-hover:bg-[#FDFBF7]/30 flex items-center justify-center transition">
                             <i data-lucide="camera" class="w-6 h-6"></i>
                         </div>
                         <span>Ambil Foto</span>
-                        <span class="text-[10px] text-[#FDFBF7]/70 font-normal">Langsung dari Kamera</span>
                     </button>
                     <button onclick="openGallery()" class="bg-[#D4A373] text-[#3D312A] font-semibold text-sm px-4 py-5 rounded-xl hover:bg-[#B98B5E] hover:text-[#FDFBF7] transition shadow-sm flex flex-col items-center gap-2 group">
                         <div class="w-12 h-12 rounded-full bg-[#3D312A]/10 group-hover:bg-[#FDFBF7]/20 flex items-center justify-center transition">
                             <i data-lucide="image" class="w-6 h-6"></i>
                         </div>
-                        <span>Unggah dari Galeri</span>
-                        <span class="text-[10px] text-[#3D312A]/60 font-normal">Pilih dari Galeri Foto</span>
+                        <span>Unggah Galeri</span>
+                    </button>
+                    <button onclick="startManualNota()" class="bg-[#F3ECE0] text-[#3D312A] border border-[#E6CCB2] font-semibold text-sm px-4 py-5 rounded-xl hover:bg-[#E6CCB2] transition shadow-sm flex flex-col items-center gap-2 group">
+                        <div class="w-12 h-12 rounded-full bg-[#FDFBF7] group-hover:bg-[#FAF6F0] flex items-center justify-center transition">
+                            <i data-lucide="pencil-line" class="w-6 h-6"></i>
+                        </div>
+                        <span>Nota Manual</span>
                     </button>
                 </div>
 
-                <!-- Drag-and-drop zone (fallback) -->
-                <div id="dropZone" onclick="document.getElementById('galleryInput').click()" class="border-2 border-dashed border-[#D4A373] hover:border-[#6F4E37] bg-[#FAF6F0] hover:bg-[#F3ECE0] rounded-xl p-6 cursor-pointer transition flex flex-col items-center justify-center group">
-                    <div class="w-10 h-10 rounded-full bg-[#F3ECE0] group-hover:bg-[#E6CCB2] text-[#6F4E37] flex items-center justify-center mb-2 transition">
-                        <i data-lucide="upload-cloud" class="w-5 h-5"></i>
-                    </div>
-                    <p class="text-sm font-semibold text-[#3D312A]">Atau seret & lepas foto nota ke sini</p>
-                    <p class="text-xs text-[#9C6F44] mt-1">Mendukung format JPG, PNG, atau WEBP</p>
-                </div>
-
-                <div class="pt-2 text-center text-xs text-[#9C6F44] font-medium flex items-center justify-center gap-1.5 bg-[#FAF6F0] py-2 px-3 rounded-xl border border-[#E6CCB2]">
-                    <i data-lucide="cpu" class="w-4 h-4 text-[#6F4E37]"></i>
-                    <span>Ditenagai oleh AI Multimodal: <strong class="text-[#3D312A]">xiaomi/mimo-v2.5</strong> (via OpenRouter)</span>
-                </div>
-
-                <div class="pt-2 flex items-center justify-center gap-2">
-                    <span class="text-xs text-[#9C6F44]">Atau tidak ada foto nota?</span>
-                    <button onclick="loadSampleReceipt()" class="text-xs font-semibold text-[#6F4E37] underline hover:text-[#3D312A]">Gunakan Contoh Nota Makanan</button>
+                <div class="pt-2 flex items-center justify-center gap-2 flex-wrap">
+                    <span class="text-xs text-[#9C6F44]">Tidak ada foto nota?</span>
+                    <button onclick="loadSampleReceipt()" class="text-xs font-semibold text-[#6F4E37] underline hover:text-[#3D312A]">Gunakan contoh nota</button>
                 </div>
             </div>
         </section>
@@ -254,19 +332,19 @@
                 <i data-lucide="loader-2" class="w-10 h-10"></i>
             </div>
             <h3 class="text-lg font-bold text-[#3D312A]">Menganalisis Nota dengan AI...</h3>
-            <p class="text-sm text-[#9C6F44] max-w-md mx-auto">Membaca nama menu, kuantitas, harga, pajak, dan diskon dari nota Anda. Mohon tunggu sebentar.</p>
+            <p class="text-sm text-[#9C6F44] max-w-md mx-auto">Membaca nama menu, kuantitas, harga, pajak, dan diskon dari nota Anda.</p>
         </section>
 
         <!-- EDITOR -->
         <section id="editorSection" class="hidden space-y-6">
             <div class="bg-[#FDFBF7] border border-[#E6CCB2] rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm">
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 min-w-0">
                     <div class="p-2.5 bg-[#F3ECE0] rounded-lg text-[#6F4E37]">
                         <i data-lucide="store" class="w-5 h-5"></i>
                     </div>
-                    <div>
-                        <input type="text" id="merchantName" value="Restoran / Kafe" oninput="appState.merchant = this.value" class="font-bold text-lg text-[#3D312A] bg-transparent border-b border-transparent hover:border-[#E6CCB2] focus:border-[#6F4E37] focus:outline-none px-1 py-0.5 rounded transition">
-                        <p class="text-xs text-[#9C6F44] px-1">Klik nama untuk menyunting nama tempat</p>
+                    <div class="min-w-0">
+                        <input type="text" id="merchantName" value="Restoran / Kafe" oninput="draftChange('merchant', this.value)" class="font-bold text-lg text-[#3D312A] bg-transparent border-b border-transparent hover:border-[#E6CCB2] focus:border-[#6F4E37] focus:outline-none px-1 py-0.5 rounded transition w-full">
+                        <p id="editorContext" class="text-xs text-[#9C6F44] px-1"></p>
                     </div>
                 </div>
                 <div id="statusPill" class="px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 bg-[#F3ECE0] text-[#6F4E37] border border-[#E6CCB2]">
@@ -275,68 +353,57 @@
                 </div>
             </div>
 
-            <div id="saveTeamBillBar" class="hidden"></div>
-            <div class="flex justify-end">
-                <button id="saveTeamBillBtn" onclick="saveTeamBill()" class="hidden text-sm font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-4 py-2 rounded-xl transition shadow-sm flex items-center gap-2">
-                    <i data-lucide="save" class="w-4 h-4"></i> Simpan ke Periode Tim
-                </button>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="bg-[#FDFBF7] rounded-xl border border-[#E6CCB2] p-3">
+                    <label class="text-[11px] font-semibold text-[#6F4E37] block mb-1">Tanggal Nota</label>
+                    <input type="date" id="notaDateInput" onchange="draftChange('occurredAt', fromDateInputValue(this.value))" class="w-full px-2.5 py-1.5 bg-[#FAF6F0] border border-[#E6CCB2] rounded-lg text-sm focus:outline-none focus:border-[#6F4E37]">
+                    <p class="text-[10px] text-[#9C6F44] mt-1">Kapan biayanya terjadi, bukan kapan dicatat.</p>
+                </div>
+                <div id="backdateWarning" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-3 text-[11px] text-amber-800"></div>
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div class="lg:col-span-7 space-y-5">
                     <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-4">
-                        <div class="flex items-center justify-between pb-3 border-b border-[#E6CCB2]">
-                            <h3 class="font-bold text-[#3D312A] flex items-center gap-2">
+                        <div class="flex items-center justify-between pb-3 border-b border-[#E6CCB2] gap-2">
+                            <h3 class="font-bold text-[#3D312A] flex items-center gap-2 text-sm">
                                 <i data-lucide="utensils" class="w-4 h-4 text-[#6F4E37]"></i>
-                                <span>Daftar Pesanan & Pemilih</span>
+                                <span>Item &amp; Pemilih</span>
                             </h3>
                             <button onclick="addNewItem()" class="text-xs font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-1.5 rounded-lg transition flex items-center gap-1">
-                                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-                                <span>Tambah Menu</span>
+                                <i data-lucide="plus" class="w-3.5 h-3.5"></i> Tambah
                             </button>
                         </div>
                         <div id="itemList" class="space-y-3"></div>
                     </div>
 
                     <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-4">
-                        <h3 class="font-bold text-[#3D312A] flex items-center gap-2 pb-3 border-b border-[#E6CCB2]">
+                        <h3 class="font-bold text-[#3D312A] flex items-center gap-2 pb-3 border-b border-[#E6CCB2] text-sm">
                             <i data-lucide="calculator" class="w-4 h-4 text-[#6F4E37]"></i>
-                            <span>Biaya Tambahan & Potongan Struk</span>
+                            <span>Pajak, Layanan &amp; Diskon</span>
                         </h3>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <div class="bg-[#FAF6F0] p-3 rounded-xl border border-[#E6CCB2]">
-                                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Pajak (Tax)</label>
-                                <div class="relative">
-                                    <span class="absolute left-2.5 top-2 text-xs font-semibold text-[#9C6F44]">Rp</span>
-                                    <input type="number" id="taxInput" oninput="updateCostState('tax', this.value)" class="w-full pl-8 pr-2 py-1.5 bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg text-sm font-semibold text-[#3D312A] focus:outline-none focus:border-[#6F4E37]">
-                                </div>
-                                <span id="taxFormatted" class="text-[10px] font-medium text-[#9C6F44] block mt-1">Rp 0</span>
+                                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Pajak</label>
+                                <input type="number" id="taxInput" oninput="draftChange('tax', this.value)" class="w-full px-2 py-1.5 bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg text-sm font-semibold focus:outline-none focus:border-[#6F4E37]">
                             </div>
                             <div class="bg-[#FAF6F0] p-3 rounded-xl border border-[#E6CCB2]">
-                                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Layanan (Service)</label>
-                                <div class="relative">
-                                    <span class="absolute left-2.5 top-2 text-xs font-semibold text-[#9C6F44]">Rp</span>
-                                    <input type="number" id="serviceInput" oninput="updateCostState('service', this.value)" class="w-full pl-8 pr-2 py-1.5 bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg text-sm font-semibold text-[#3D312A] focus:outline-none focus:border-[#6F4E37]">
-                                </div>
-                                <span id="serviceFormatted" class="text-[10px] font-medium text-[#9C6F44] block mt-1">Rp 0</span>
+                                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Layanan</label>
+                                <input type="number" id="serviceInput" oninput="draftChange('service', this.value)" class="w-full px-2 py-1.5 bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg text-sm font-semibold focus:outline-none focus:border-[#6F4E37]">
                             </div>
                             <div class="bg-[#FAF6F0] p-3 rounded-xl border border-[#E6CCB2]">
-                                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Diskon / Promo</label>
-                                <div class="relative">
-                                    <span class="absolute left-2.5 top-2 text-xs font-semibold text-[#9C6F44]">Rp</span>
-                                    <input type="number" id="discountInput" oninput="updateCostState('discount', this.value)" class="w-full pl-8 pr-2 py-1.5 bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg text-sm font-semibold text-[#3D312A] focus:outline-none focus:border-[#6F4E37]">
-                                </div>
-                                <span id="discountFormatted" class="text-[10px] font-medium text-[#9C6F44] block mt-1">Rp 0</span>
+                                <label class="text-xs font-semibold text-[#6F4E37] block mb-1">Diskon</label>
+                                <input type="number" id="discountInput" oninput="draftChange('discount', this.value)" class="w-full px-2 py-1.5 bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg text-sm font-semibold focus:outline-none focus:border-[#6F4E37]">
                             </div>
                         </div>
-                        <div class="bg-[#F3ECE0] rounded-xl p-4 flex items-center justify-between border border-[#E6CCB2]">
+                        <div class="bg-[#F3ECE0] rounded-xl p-4 flex items-center justify-between border border-[#E6CCB2] gap-2 flex-wrap">
                             <div>
-                                <span class="text-xs font-semibold text-[#6F4E37] uppercase tracking-wider block">Total Struk Kasir</span>
+                                <span class="text-xs font-semibold text-[#6F4E37] uppercase tracking-wider block">Total Nota</span>
                                 <span id="grandTotalDisplay" class="text-xl font-bold text-[#3D312A]">Rp 0</span>
                             </div>
-                            <button onclick="autoAssignUnassignedItems()" class="text-xs font-semibold bg-[#D4A373] text-[#3D312A] hover:bg-[#B98B5E] hover:text-[#FDFBF7] px-3 py-2 rounded-lg transition flex items-center gap-1 shadow-sm">
+                            <button onclick="bagiRataUnassigned()" class="text-xs font-semibold bg-[#D4A373] text-[#3D312A] hover:bg-[#B98B5E] hover:text-[#FDFBF7] px-3 py-2 rounded-lg transition flex items-center gap-1 shadow-sm">
                                 <i data-lucide="users" class="w-3.5 h-3.5"></i>
-                                <span>Bagi Rata Sisa Menu</span>
+                                <span>Bagi rata ke semua peserta</span>
                             </button>
                         </div>
                     </div>
@@ -344,35 +411,35 @@
 
                 <div class="lg:col-span-5 space-y-5">
                     <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-4">
-                        <h3 class="font-bold text-[#3D312A] flex items-center gap-2 pb-3 border-b border-[#E6CCB2]">
-                            <i data-lucide="users" class="w-4 h-4 text-[#6F4E37]"></i>
-                            <span>Anggota Kelompok</span>
+                        <h3 class="font-bold text-[#3D312A] flex items-center gap-2 pb-3 border-b border-[#E6CCB2] text-sm">
+                            <i data-lucide="wallet-cards" class="w-4 h-4 text-[#6F4E37]"></i>
+                            <span>Pembayar</span>
                         </h3>
-                        <p id="rosterLockedHint" class="hidden text-[11px] text-[#9C6F44] italic">Roster terkunci dari anggota tim periode.</p>
-                        <div id="addFriendWrap" class="flex gap-2">
-                            <input type="text" id="friendNameInput" placeholder="Nama teman (misal: Budi)..." onkeypress="if(event.key==='Enter') addFriend()" class="flex-grow px-3.5 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
-                            <button onclick="addFriend()" class="bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-4 py-2 rounded-xl font-semibold text-sm transition flex items-center gap-1 shadow-sm">
-                                <i data-lucide="user-plus" class="w-4 h-4"></i>
-                                <span>Tambah</span>
-                            </button>
-                        </div>
-                        <div id="friendsList" class="flex flex-wrap gap-2 pt-1"></div>
+                        <div id="payerRows" class="space-y-2"></div>
+                        <button onclick="addPayerRow()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-1.5 rounded-lg border border-[#E6CCB2] transition w-full">+ Tambah pembayar</button>
+                        <div id="payerRemainder" class="text-xs font-semibold rounded-lg px-3 py-2 border"></div>
                     </div>
 
                     <div class="bg-[#FDFBF7] rounded-2xl border border-[#E6CCB2] p-5 shadow-sm space-y-4">
-                        <div class="flex items-center justify-between pb-3 border-b border-[#E6CCB2]">
-                            <h3 class="font-bold text-[#3D312A] flex items-center gap-2">
-                                <i data-lucide="pie-chart" class="w-4 h-4 text-[#6F4E37]"></i>
-                                <span>Rincian Tagihan Per Orang</span>
-                            </h3>
-                            <button onclick="copyAllSummary()" class="text-xs font-semibold text-[#6F4E37] hover:text-[#3D312A] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-2.5 py-1.5 rounded-lg transition flex items-center gap-1 border border-[#E6CCB2]">
-                                <i data-lucide="copy" class="w-3.5 h-3.5"></i>
-                                <span>Salin Semua ke WA</span>
-                            </button>
+                        <h3 class="font-bold text-[#3D312A] flex items-center gap-2 pb-3 border-b border-[#E6CCB2] text-sm">
+                            <i data-lucide="users" class="w-4 h-4 text-[#6F4E37]"></i>
+                            <span id="editorRosterTitle">Anggota</span>
+                        </h3>
+                        <div id="editorRoster" class="flex flex-wrap gap-2"></div>
+                        <div id="editorAddMemberWrap" class="flex gap-2 hidden">
+                            <input type="text" id="editorMemberInput" placeholder="Nama teman..." onkeypress="if(event.key==='Enter') addEditorMember()" class="flex-grow px-3 py-2 bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl text-sm focus:outline-none focus:border-[#6F4E37]">
+                            <button onclick="addEditorMember()" class="bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-2 rounded-xl font-semibold text-xs transition">Tambah</button>
                         </div>
-                        <div id="personSummaryList" class="space-y-3"></div>
+                        <div id="editorSummary" class="space-y-2 pt-1"></div>
                     </div>
                 </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row gap-2 justify-end">
+                <button onclick="cancelEditor()" class="text-sm font-semibold text-[#6F4E37] border border-[#E6CCB2] px-4 py-2 rounded-xl hover:bg-[#F3ECE0] transition">Batal</button>
+                <button id="saveNotaBtn" onclick="saveNota()" class="text-sm font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-4 py-2 rounded-xl transition shadow-sm flex items-center justify-center gap-2">
+                    <i data-lucide="save" class="w-4 h-4"></i> Simpan Nota
+                </button>
             </div>
         </section>
     </main>
@@ -382,12 +449,10 @@
         <video id="cameraVideo" autoplay playsinline class="w-full h-full object-contain bg-black"></video>
         <canvas id="cameraCanvas" class="hidden"></canvas>
 
-        <!-- Close button (top-right) -->
         <button onclick="closeCamera()" class="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm flex items-center justify-center transition z-10">
             <i data-lucide="x" class="w-5 h-5 text-white"></i>
         </button>
 
-        <!-- Header label -->
         <div class="absolute top-4 left-4 bg-black/40 backdrop-blur-sm px-3 py-1.5 rounded-lg z-10">
             <p class="text-white text-xs font-semibold flex items-center gap-1.5">
                 <i data-lucide="camera" class="w-3.5 h-3.5"></i>
@@ -395,29 +460,26 @@
             </p>
         </div>
 
-        <!-- Bottom controls -->
         <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent pt-16 pb-8 px-6 flex items-center justify-center">
             <button onclick="capturePhoto()" id="captureBtn" class="w-16 h-16 rounded-full bg-white border-4 border-[#D4A373] hover:border-[#6F4E37] shadow-xl active:scale-95 transition flex items-center justify-center">
-                <div class="w-12 h-12 rounded-full bg-[#D4A373] group-hover:bg-[#6F4E37]"></div>
+                <div class="w-12 h-12 rounded-full bg-[#D4A373]"></div>
             </button>
         </div>
     </div>
 
     <div id="customModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden opacity-0 transition-all duration-200">
-        <div class="bg-[#FDFBF7] border border-[#E6CCB2] rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl transform scale-95 transition-all duration-200" id="modalContent">
+        <div class="bg-[#FDFBF7] border border-[#E6CCB2] rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl transform scale-95 transition-all duration-200" id="modalContent">
             <div class="flex items-center gap-3">
-                <div id="modalIconContainer" class="w-10 h-10 rounded-xl bg-[#F3ECE0] text-[#6F4E37] flex items-center justify-center shrink-0">
+                <div class="w-10 h-10 rounded-xl bg-[#F3ECE0] text-[#6F4E37] flex items-center justify-center shrink-0">
                     <i data-lucide="info" class="w-5 h-5"></i>
                 </div>
                 <div>
                     <h3 id="modalTitle" class="font-bold text-base text-[#3D312A]">Pemberitahuan</h3>
-                    <p id="modalSubtitle" class="text-xs text-[#9C6F44]">BagiRata AI System</p>
+                    <p class="text-xs text-[#9C6F44]">BagiRata AI</p>
                 </div>
             </div>
-            <p id="modalBody" class="text-sm text-[#3D312A]">Pesan dialog informasi...</p>
-            <div class="flex justify-end gap-2 pt-2 border-t border-[#E6CCB2]" id="modalActions">
-                <button onclick="closeModal()" class="px-4 py-2 bg-[#6F4E37] text-[#FDFBF7] font-semibold text-xs rounded-xl hover:bg-[#5C3D2E] transition">Mengerti</button>
-            </div>
+            <div id="modalBody" class="text-sm text-[#3D312A] space-y-2 max-h-[50vh] overflow-y-auto"></div>
+            <div class="flex justify-end gap-2 pt-2 border-t border-[#E6CCB2]" id="modalActions"></div>
         </div>
     </div>
 
@@ -428,12 +490,10 @@
 
     <footer class="bg-[#FDFBF7] border-t border-[#E6CCB2] py-4 mt-8">
         <div class="max-w-5xl mx-auto px-4 text-center text-xs text-[#9C6F44]">
-            <p>© 2026 BagiRata AI. Diproses secara presisi, proporsional, & transparan.</p>
+            <p>© 2026 BagiRata AI. Diproses secara presisi, proporsional, &amp; transparan.</p>
         </div>
     </footer>
 
-    <script src="js/calc.js"></script>
-    <script src="js/storage.js"></script>
-    <script src="js/app.js"></script>
+    <script type="module" src="js/app.js"></script>
 </body>
 </html>

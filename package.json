@@ -1,0 +1,10 @@
+{
+  "name": "bagirata",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BagiRata AI — split bill SPA. This manifest exists only to run the domain tests.",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  }
+}

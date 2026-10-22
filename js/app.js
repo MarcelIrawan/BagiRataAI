@@ -1,1011 +1,1767 @@
-/** BagiRata app: home, one-time split, team period hub, settlement */
+/**
+ * BagiRata app shell.
+ *
+ * Rendering and navigation only. Every number on screen comes from
+ * js/domain.js; nothing here does money arithmetic.
+ */
+
+import {
+  addAnggota,
+  addNota,
+  addSetoran as addSetoranDomain,
+  archiveTim,
+  canDeleteTim,
+  cascadePreview,
+  closePeriode,
+  createTim,
+  currentIndex,
+  deleteTim,
+  findAnggota,
+  findPeriode,
+  findTim,
+  handEnteredOpening,
+  handoverHolder,
+  holderAt,
+  holderNet,
+  holderNetAt,
+  isHolder,
+  itemLineTotal,
+  kas,
+  konsumsi,
+  makePeriode,
+  minimalTransfers,
+  notaBreakdown,
+  notaGrandTotal,
+  openNewPeriode as openNewPeriodeDomain,
+  openPeriodeOf,
+  outstandingAt,
+  paidByOf,
+  paidByTotal,
+  participantsOf,
+  periodeIndex,
+  removeNota,
+  reopenPeriode,
+  rupiah,
+  saldoNow,
+  setAnggotaStatus,
+  setParticipants,
+  setSaldoAwal,
+  settlementRows,
+  unarchiveTim,
+  updateNota,
+} from './domain.js';
+
+import {
+  colorOf,
+  escapeHtml,
+  formatDate,
+  formatDateTime,
+  formatRupiah,
+  formatSignedRupiah,
+  fromDateInputValue,
+  periodeLabel as labelOf,
+  toDateInputValue,
+  whatsappSafe,
+} from './format.js';
+
+import { nowIso, uid } from './ids.js';
+import { loadStore, saveActive, saveStore } from './storage.js';
+
+/* ------------------------------------------------------------------ *
+ * State
+ * ------------------------------------------------------------------ */
 
 let store = loadStore();
-let sessionMode = 'home'; // 'home' | 'onetime' | 'team' | 'createTeam' | 'settlement'
-let activeTeamId = null;
-let editingBillId = null;
-let draftMembers = [];
+let view = 'home';
+let history = [];
+let activeTimId = null;
+let activePeriodeId = null;
+let oneOff = null;
+let draft = null;
+let participantDraft = null;
 
-let appState = {
-  merchant: 'Restoran / Kafe',
-  items: [],
-  friends: [],
-  tax: 0,
-  service: 0,
-  discount: 0
-};
+const SECTIONS = [
+  'homeSection',
+  'createTimSection',
+  'timSection',
+  'periodeSection',
+  'settlementSection',
+  'uploadSection',
+  'loadingSection',
+  'editorSection',
+];
 
-window.onload = function () {
-  lucide.createIcons();
-  showView('home');
-};
+const $ = (id) => document.getElementById(id);
 
-/* ---------- Views ---------- */
-function hideAllViews() {
-  ['homeSection', 'createTeamSection', 'teamHubSection', 'settlementSection',
-    'uploadSection', 'loadingSection', 'editorSection'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.add('hidden');
-  });
+function icons() {
+  try {
+    window.lucide?.createIcons();
+  } catch (error) {
+    /* icons are cosmetic */
+  }
 }
 
-function showView(view) {
-  hideAllViews();
-  sessionMode = view;
-  const resetBtn = document.getElementById('headerResetBtn');
-  const homeBtn = document.getElementById('headerHomeBtn');
+function currentTim() {
+  if (oneOff) return oneOff.tim;
+  return findTim(store, activeTimId);
+}
 
-  if (view === 'home') {
-    document.getElementById('homeSection').classList.remove('hidden');
-    resetBtn.classList.add('hidden');
-    homeBtn.classList.add('hidden');
-    renderHome();
-  } else if (view === 'createTeam') {
-    document.getElementById('createTeamSection').classList.remove('hidden');
-    resetBtn.classList.add('hidden');
-    homeBtn.classList.remove('hidden');
-    renderCreateTeam();
-  } else if (view === 'team') {
-    document.getElementById('teamHubSection').classList.remove('hidden');
-    resetBtn.classList.add('hidden');
-    homeBtn.classList.remove('hidden');
-    renderTeamHub();
-  } else if (view === 'settlement') {
-    document.getElementById('settlementSection').classList.remove('hidden');
-    resetBtn.classList.add('hidden');
-    homeBtn.classList.remove('hidden');
-    renderSettlement();
-  } else if (view === 'onetime' || view === 'teamBill') {
-    document.getElementById('uploadSection').classList.remove('hidden');
-    resetBtn.classList.remove('hidden');
-    homeBtn.classList.remove('hidden');
+function currentPeriode() {
+  const tim = currentTim();
+  if (!tim) return null;
+  return findPeriode(tim, activePeriodeId);
+}
+
+/** Persist a Tim; one-off mode is in-memory only and never touches storage. */
+function commitTim(tim) {
+  if (oneOff) {
+    oneOff.tim = tim;
+    return;
   }
-  lucide.createIcons();
+  store = { ...store, tims: store.tims.map((t) => (t.id === tim.id ? tim : t)) };
+  saveStore(store);
+  saveActive(store, activeTimId, activePeriodeId);
+}
+
+function commitStore(nextStore) {
+  store = nextStore;
+  saveStore(store);
+  saveActive(store, activeTimId, activePeriodeId);
+}
+
+/* ------------------------------------------------------------------ *
+ * Navigation
+ * ------------------------------------------------------------------ */
+
+function render() {
+  if (view === 'editor' && !draft) view = oneOff ? 'upload' : 'periode';
+  SECTIONS.forEach((id) => $(id)?.classList.add('hidden'));
+
+  const section = {
+    home: 'homeSection',
+    create: 'createTimSection',
+    tim: 'timSection',
+    periode: 'periodeSection',
+    settlement: 'settlementSection',
+    upload: 'uploadSection',
+    loading: 'loadingSection',
+    editor: 'editorSection',
+  }[view];
+
+  if (section) $(section)?.classList.remove('hidden');
+
+  $('headerBackBtn').classList.toggle('hidden', view === 'home');
+  $('headerBackBtn').classList.toggle('flex', view !== 'home');
+  $('headerHomeBtn').classList.toggle('hidden', view === 'home');
+  $('headerHomeBtn').classList.toggle('flex', view !== 'home');
+  $('headerResetBtn').classList.toggle('hidden', view !== 'editor');
+  $('headerResetBtn').classList.toggle('flex', view === 'editor');
+
+  if (view === 'home') renderHome();
+  if (view === 'create') renderCreateTim();
+  if (view === 'tim') renderTim();
+  if (view === 'periode') renderPeriode();
+  if (view === 'settlement') renderSettlement();
+  if (view === 'upload') renderUpload();
+  if (view === 'editor') renderEditor();
+
+  icons();
+}
+
+function navigate(next, { replace = false } = {}) {
+  if (!replace && next !== view) history.push({ view, activeTimId, activePeriodeId });
+  view = next;
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function goBack() {
+  let previous = history.pop();
+  // A finished draft leaves no editor to return to.
+  while (previous && previous.view === 'editor' && !draft) previous = history.pop();
+  if (!previous) {
+    goHome();
+    return;
+  }
+  view = previous.view;
+  activeTimId = previous.activeTimId;
+  activePeriodeId = previous.activePeriodeId;
+  render();
 }
 
 function goHome() {
-  if (sessionMode === 'teamBill' && activeTeamId) {
-    editingBillId = null;
-    resetBillState(false);
-    showView('team');
+  const wasOneOff = Boolean(oneOff);
+  oneOff = null;
+  draft = null;
+  history = [];
+  activeTimId = null;
+  activePeriodeId = null;
+  view = 'home';
+  // Leaving a one-off split must not touch storage at all.
+  if (!wasOneOff) saveActive(store, null, null);
+  render();
+}
+
+function openTim(timId) {
+  activeTimId = timId;
+  const tim = findTim(store, timId);
+  if (!tim) {
+    showModal({ title: 'Tim tidak ditemukan', body: '<p>Tim ini sudah tidak ada.</p>' });
+    goHome();
     return;
   }
-  activeTeamId = null;
-  editingBillId = null;
-  draftMembers = [];
-  resetBillState(false);
-  showView('home');
+  activePeriodeId = openPeriodeOf(tim)?.id || tim.periods[tim.periods.length - 1]?.id || null;
+  saveActive(store, activeTimId, activePeriodeId);
+  navigate('tim');
 }
 
-function startOneTime() {
-  activeTeamId = null;
-  editingBillId = null;
-  resetBillState(true);
-  sessionMode = 'onetime';
-  showView('onetime');
+function openPeriode(periodeId) {
+  activePeriodeId = periodeId;
+  saveActive(store, activeTimId, activePeriodeId);
+  participantDraft = null;
+  navigate('periode');
 }
 
-/* ---------- Home ---------- */
+function openSettlement() {
+  navigate('settlement');
+}
+
+/* ------------------------------------------------------------------ *
+ * Home
+ * ------------------------------------------------------------------ */
+
 function renderHome() {
   store = loadStore();
-  const open = store.teams.filter(t => t.status === 'open');
-  const closed = store.teams.filter(t => t.status === 'closed');
+  const tims = store.tims.filter((t) => !t.archivedAt);
+  const archived = store.tims.filter((t) => t.archivedAt);
 
-  const openEl = document.getElementById('openTeamsList');
-  const closedEl = document.getElementById('closedTeamsList');
-
-  if (open.length === 0) {
-    openEl.innerHTML = `<p class="text-sm text-[#9C6F44] italic">Belum ada tim aktif. Buat tim baru untuk periode split bill.</p>`;
+  const list = $('timsList');
+  if (tims.length === 0) {
+    list.innerHTML =
+      '<p class="text-sm text-[#9C6F44] italic">Belum ada Tim. Buat Tim untuk kelompok yang makan bersama berulang kali.</p>';
   } else {
-    openEl.innerHTML = open.map(t => {
-      const holder = t.members.find(m => m.id === t.holderId);
-      return `
-        <button onclick="openTeam('${t.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
-          <div>
-            <p class="font-bold text-[#3D312A]">${escapeHtml(t.name)}</p>
-            <p class="text-xs text-[#9C6F44] mt-0.5">${t.members.length} anggota · ${t.bills.length} nota · Holder: ${escapeHtml(holder ? holder.name : '-')}</p>
-          </div>
-          <i data-lucide="chevron-right" class="w-5 h-5 text-[#6F4E37]"></i>
-        </button>`;
-    }).join('');
+    list.innerHTML = tims
+      .map((tim) => {
+        const holder = findAnggota(tim, tim.holderId);
+        const open = openPeriodeOf(tim);
+        const net = holderNet(tim);
+        const notaCount = (tim.periods || []).reduce((sum, p) => sum + (p.bills || []).length, 0);
+        return `
+          <button onclick="openTim('${tim.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="font-bold text-[#3D312A] truncate">${escapeHtml(tim.name)}</p>
+              <p class="text-xs text-[#9C6F44] mt-0.5">
+                ${tim.members.length} anggota · ${tim.periods.length} periode · ${notaCount} nota · Holder: ${escapeHtml(holder ? holder.name : '-')}
+              </p>
+              <p class="text-[11px] mt-1 ${open ? 'text-emerald-700' : 'text-[#9C6F44]'}">
+                ${open ? 'Periode terbuka · ' + escapeHtml(labelOf(open, periodeIndex(tim, open.id))) : 'Tidak ada periode terbuka (idle)'}
+                ${net !== 0 ? ` · Holder Net ${formatRupiah(net)}` : ''}
+              </p>
+            </div>
+            <i data-lucide="chevron-right" class="w-5 h-5 text-[#6F4E37] shrink-0"></i>
+          </button>`;
+      })
+      .join('');
   }
 
-  if (closed.length === 0) {
-    closedEl.innerHTML = `<p class="text-sm text-[#9C6F44] italic">Belum ada riwayat periode tertutup.</p>`;
+  $('archivedCount').textContent = archived.length > 0 ? String(archived.length) : '';
+  const archivedList = $('archivedTimsList');
+  if (archived.length === 0) {
+    archivedList.innerHTML = '<p class="text-sm text-[#9C6F44] italic">Belum ada Tim yang diarsipkan.</p>';
   } else {
-    closedEl.innerHTML = closed.map(t => `
-      <button onclick="openSettlement('${t.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
-        <div>
-          <p class="font-bold text-[#3D312A]">${escapeHtml(t.name)}</p>
-          <p class="text-xs text-[#9C6F44] mt-0.5">Ditutup ${t.closedAt ? new Date(t.closedAt).toLocaleDateString('id-ID') : '-'} · ${t.bills.length} nota</p>
-        </div>
-        <span class="text-[10px] font-semibold uppercase tracking-wide bg-[#F3ECE0] text-[#6F4E37] px-2 py-1 rounded-full">Selesai</span>
-      </button>`).join('');
+    archivedList.innerHTML = archived
+      .map((tim) => {
+        const holder = findAnggota(tim, tim.holderId);
+        const { owed, credit } = outstandingAt(tim, currentIndex(tim));
+        return `
+          <button onclick="openTim('${tim.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="font-bold text-[#3D312A] truncate">${escapeHtml(tim.name)}</p>
+              <p class="text-xs text-[#9C6F44] mt-0.5">Holder: ${escapeHtml(holder ? holder.name : '-')} · ${tim.periods.length} periode</p>
+              ${
+                owed !== 0 || credit !== 0
+                  ? `<p class="text-[11px] font-semibold text-amber-800 mt-1">Saldo berjalan belum nol — ditagih ${formatRupiah(owed)}${credit !== 0 ? ` · kredit ${formatRupiah(credit)}` : ''}</p>`
+                  : '<p class="text-[11px] text-[#9C6F44] mt-1">Tidak ada saldo berjalan.</p>'
+              }
+            </div>
+            <span class="text-[10px] font-semibold uppercase tracking-wide bg-[#F3ECE0] text-[#6F4E37] px-2 py-1 rounded-full shrink-0">Arsip</span>
+          </button>`;
+      })
+      .join('');
   }
-  lucide.createIcons();
 }
 
-/* ---------- Create Team ---------- */
-function startCreateTeam() {
+/* ------------------------------------------------------------------ *
+ * Create Tim
+ * ------------------------------------------------------------------ */
+
+let draftMembers = [];
+
+function startCreateTim() {
   draftMembers = [];
-  document.getElementById('teamNameInput').value = '';
-  document.getElementById('draftMemberInput').value = '';
-  showView('createTeam');
+  $('teamNameInput').value = '';
+  $('draftMemberInput').value = '';
+  navigate('create');
 }
 
-function renderCreateTeam() {
-  const list = document.getElementById('draftMembersList');
-  const holderSelect = document.getElementById('holderSelect');
-
+function renderCreateTim() {
+  const list = $('draftMembersList');
   if (draftMembers.length === 0) {
-    list.innerHTML = `<span class="text-xs text-[#9C6F44] italic">Tambahkan minimal 2 anggota.</span>`;
+    list.innerHTML = '<span class="text-xs text-[#9C6F44] italic">Tambahkan minimal 2 anggota.</span>';
   } else {
-    list.innerHTML = draftMembers.map((m, i) => {
-      const color = FRIEND_COLORS[m.colorIndex % FRIEND_COLORS.length];
-      return `
-        <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shadow-sm ${color.bg} ${color.text} ${color.border}">
-          <span>${escapeHtml(m.name)}</span>
-          <button onclick="removeDraftMember(${i})" class="hover:opacity-75"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
-        </div>`;
-    }).join('');
+    list.innerHTML = draftMembers
+      .map((member, index) => {
+        const color = colorOf(member.colorIndex);
+        return `
+          <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shadow-sm ${color.bg} ${color.text} ${color.border}">
+            <span>${escapeHtml(member.name)}</span>
+            <button onclick="removeDraftMember(${index})" class="hover:opacity-75"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+          </span>`;
+      })
+      .join('');
   }
 
-  holderSelect.innerHTML = draftMembers.length === 0
-    ? `<option value="">— pilih setelah menambah anggota —</option>`
-    : draftMembers.map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
-
-  lucide.createIcons();
+  $('holderSelect').innerHTML =
+    draftMembers.length === 0
+      ? '<option value="">— pilih setelah menambah anggota —</option>'
+      : draftMembers.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('');
 }
 
 function addDraftMember() {
-  const input = document.getElementById('draftMemberInput');
+  const input = $('draftMemberInput');
   const name = input.value.trim();
   if (!name) return;
-  draftMembers.push({
-    id: uid('m'),
-    name,
-    colorIndex: draftMembers.length % FRIEND_COLORS.length
-  });
+  draftMembers.push({ id: uid('m'), name, colorIndex: draftMembers.length });
   input.value = '';
-  renderCreateTeam();
+  renderCreateTim();
+  icons();
 }
 
 function removeDraftMember(index) {
   draftMembers.splice(index, 1);
-  draftMembers.forEach((m, i) => { m.colorIndex = i % FRIEND_COLORS.length; });
-  renderCreateTeam();
-}
-
-function confirmCreateTeam() {
-  const name = document.getElementById('teamNameInput').value.trim();
-  const holderId = document.getElementById('holderSelect').value;
-  if (!name) {
-    showModal('Peringatan', 'Nama tim wajib diisi.');
-    return;
-  }
-  if (draftMembers.length < 2) {
-    showModal('Peringatan', 'Tambahkan minimal 2 anggota tim.');
-    return;
-  }
-  if (!holderId) {
-    showModal('Peringatan', 'Pilih pemegang dana (holder).');
-    return;
-  }
-
-  const team = createTeamRecord({ name, members: draftMembers, holderId });
-  store = loadStore();
-  upsertTeam(store, team);
-  draftMembers = [];
-  openTeam(team.id);
-  showToast('Tim periode berhasil dibuat.');
-}
-
-/* ---------- Team Hub ---------- */
-function openTeam(teamId) {
-  store = loadStore();
-  const team = getTeam(store, teamId);
-  if (!team) {
-    showModal('Peringatan', 'Tim tidak ditemukan.');
-    showView('home');
-    return;
-  }
-  activeTeamId = teamId;
-  if (team.status === 'closed') {
-    openSettlement(teamId);
-    return;
-  }
-  showView('team');
-}
-
-function getActiveTeam() {
-  store = loadStore();
-  return getTeam(store, activeTeamId);
-}
-
-function renderTeamHub() {
-  const team = getActiveTeam();
-  if (!team) return;
-
-  document.getElementById('teamHubTitle').innerText = team.name;
-  const holder = team.members.find(m => m.id === team.holderId);
-  document.getElementById('teamHubSubtitle').innerText =
-    `Pemegang dana: ${holder ? holder.name : '-'} · ${team.bills.length} nota`;
-
-  const membersEl = document.getElementById('teamMembersChips');
-  membersEl.innerHTML = team.members.map(m => {
-    const color = FRIEND_COLORS[m.colorIndex % FRIEND_COLORS.length];
-    const isHolder = m.id === team.holderId;
-    return `
-      <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold ${color.bg} ${color.text} ${color.border}">
-        ${escapeHtml(m.name)}
-        ${isHolder ? '<span class="text-[10px] opacity-90 uppercase">Holder</span>' : ''}
-      </span>`;
-  }).join('');
-
-  const settlement = calculateTeamSettlement(team);
-  const balEl = document.getElementById('liveBalancesList');
-  balEl.innerHTML = settlement.rows.map(r => {
-    if (r.isHolder) {
-      return `
-        <div class="flex justify-between items-center text-sm py-2 border-b border-[#E6CCB2]/60">
-          <span class="font-semibold">${escapeHtml(r.member.name)} <span class="text-[10px] text-[#9C6F44]">(Holder)</span></span>
-          <span class="font-bold text-[#6F4E37]">Net ${formatRupiah(settlement.holderNet)}</span>
-        </div>`;
-    }
-    const label = r.saldo > 0
-      ? `utang ${formatRupiah(r.saldo)}`
-      : r.saldo < 0
-        ? `kredit ${formatRupiah(Math.abs(r.saldo))}`
-        : 'lunas';
-    const cls = r.saldo > 0 ? 'text-amber-800' : r.saldo < 0 ? 'text-emerald-700' : 'text-[#6F4E37]';
-    return `
-      <div class="flex justify-between items-center text-sm py-2 border-b border-[#E6CCB2]/60">
-        <span>${escapeHtml(r.member.name)}
-          <span class="text-[10px] text-[#9C6F44] block">konsumsi ${formatRupiah(r.consumed)} · setor ${formatRupiah(r.deposited)}</span>
-        </span>
-        <span class="font-semibold ${cls}">${label}</span>
-      </div>`;
-  }).join('');
-
-  const billsEl = document.getElementById('teamBillsList');
-  if (team.bills.length === 0) {
-    billsEl.innerHTML = `<p class="text-sm text-[#9C6F44] italic">Belum ada nota. Tambah split bill untuk periode ini.</p>`;
-  } else {
-    billsEl.innerHTML = team.bills.map(b => `
-      <button onclick="editTeamBill('${b.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-3 hover:border-[#D4A373] transition flex justify-between items-center gap-2">
-        <div>
-          <p class="font-semibold text-sm text-[#3D312A]">${escapeHtml(b.merchant)}</p>
-          <p class="text-[11px] text-[#9C6F44]">${new Date(b.createdAt).toLocaleString('id-ID')}</p>
-        </div>
-        <span class="font-bold text-sm text-[#6F4E37]">${formatRupiah(getBillGrandTotal(b))}</span>
-      </button>`).join('');
-  }
-
-  const depositSelect = document.getElementById('depositMemberSelect');
-  depositSelect.innerHTML = team.members
-    .filter(m => m.id !== team.holderId)
-    .map(m => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')
-    || `<option value="">Tidak ada anggota non-holder</option>`;
-
-  const depList = document.getElementById('depositsList');
-  if (team.deposits.length === 0) {
-    depList.innerHTML = `<p class="text-xs text-[#9C6F44] italic">Belum ada setoran.</p>`;
-  } else {
-    depList.innerHTML = [...team.deposits].reverse().map(d => {
-      const m = team.members.find(x => x.id === d.memberId);
-      return `
-        <div class="flex justify-between text-xs py-1.5 border-b border-[#E6CCB2]/40">
-          <span>${escapeHtml(m ? m.name : '?')} ${d.note ? '· ' + escapeHtml(d.note) : ''}
-            <span class="text-[#9C6F44] block">${new Date(d.createdAt).toLocaleString('id-ID')}</span>
-          </span>
-          <span class="font-semibold text-emerald-700">${formatRupiah(d.amount)}</span>
-        </div>`;
-    }).join('');
-  }
-
-  lucide.createIcons();
-}
-
-function addDeposit() {
-  const team = getActiveTeam();
-  if (!team || team.status !== 'open') return;
-  const memberId = document.getElementById('depositMemberSelect').value;
-  const amount = Math.max(0, Number(document.getElementById('depositAmountInput').value) || 0);
-  const note = document.getElementById('depositNoteInput').value.trim();
-  if (!memberId || amount <= 0) {
-    showModal('Peringatan', 'Pilih anggota dan isi jumlah setoran yang valid.');
-    return;
-  }
-  team.deposits.push({
-    id: uid('dep'),
-    memberId,
-    amount,
-    note,
-    createdAt: new Date().toISOString()
+  draftMembers.forEach((member, i) => {
+    member.colorIndex = i;
   });
-  store = loadStore();
-  upsertTeam(store, team);
-  document.getElementById('depositAmountInput').value = '';
-  document.getElementById('depositNoteInput').value = '';
-  renderTeamHub();
-  showToast('Setoran berhasil dicatat.');
+  renderCreateTim();
+  icons();
 }
 
-function startNewTeamBill() {
-  const team = getActiveTeam();
-  if (!team) return;
-  editingBillId = null;
-  resetBillState(false);
-  appState.friends = membersToFriends(team.members);
-  sessionMode = 'teamBill';
-  hideAllViews();
-  document.getElementById('uploadSection').classList.remove('hidden');
-  document.getElementById('headerResetBtn').classList.remove('hidden');
-  document.getElementById('headerHomeBtn').classList.remove('hidden');
-  updateTeamBillChrome();
-  lucide.createIcons();
-}
-
-function editTeamBill(billId) {
-  const team = getActiveTeam();
-  if (!team) return;
-  const bill = team.bills.find(b => b.id === billId);
-  if (!bill) return;
-  editingBillId = billId;
-  appState = {
-    merchant: bill.merchant,
-    items: JSON.parse(JSON.stringify(bill.items)),
-    friends: membersToFriends(team.members),
-    tax: bill.tax,
-    service: bill.service,
-    discount: bill.discount
-  };
-  sessionMode = 'teamBill';
-  hideAllViews();
-  document.getElementById('uploadSection').classList.add('hidden');
-  document.getElementById('loadingSection').classList.add('hidden');
-  document.getElementById('editorSection').classList.remove('hidden');
-  document.getElementById('headerResetBtn').classList.remove('hidden');
-  document.getElementById('headerHomeBtn').classList.remove('hidden');
-  document.getElementById('merchantName').value = appState.merchant;
-  document.getElementById('taxInput').value = appState.tax || '';
-  document.getElementById('serviceInput').value = appState.service || '';
-  document.getElementById('discountInput').value = appState.discount || '';
-  updateTeamBillChrome();
-  renderAll();
-}
-
-function updateTeamBillChrome() {
-  const addFriendWrap = document.getElementById('addFriendWrap');
-  const saveBillBtn = document.getElementById('saveTeamBillBtn');
-  const rosterHint = document.getElementById('rosterLockedHint');
-  if (sessionMode === 'teamBill') {
-    if (addFriendWrap) addFriendWrap.classList.add('hidden');
-    if (saveBillBtn) saveBillBtn.classList.remove('hidden');
-    if (rosterHint) rosterHint.classList.remove('hidden');
-  } else {
-    if (addFriendWrap) addFriendWrap.classList.remove('hidden');
-    if (saveBillBtn) saveBillBtn.classList.add('hidden');
-    if (rosterHint) rosterHint.classList.add('hidden');
+function confirmCreateTim() {
+  const name = $('teamNameInput').value.trim();
+  const holderId = $('holderSelect').value;
+  if (!name) return showModal({ title: 'Nama Tim wajib diisi', body: '<p>Beri nama Tim supaya mudah dikenali.</p>' });
+  if (draftMembers.length < 2) {
+    return showModal({ title: 'Anggota kurang', body: '<p>Tambahkan minimal 2 anggota.</p>' });
   }
+  if (!holderId) return showModal({ title: 'Holder belum dipilih', body: '<p>Pilih satu pemegang dana.</p>' });
+
+  const tim = createTim({
+    id: uid('tim'),
+    name,
+    members: draftMembers,
+    holderId,
+    now: nowIso(),
+    periodeId: uid('per'),
+  });
+
+  store = { ...store, tims: [...store.tims, tim] };
+  saveStore(store);
+  draftMembers = [];
+  activeTimId = tim.id;
+  activePeriodeId = tim.periods[0].id;
+  saveActive(store, activeTimId, activePeriodeId);
+  showToast('Tim dan periode pertama dibuat.');
+  navigate('tim');
 }
 
-function saveTeamBill() {
-  const team = getActiveTeam();
-  if (!team || team.status !== 'open') return;
-  if (appState.items.length === 0) {
-    showModal('Peringatan', 'Tambahkan minimal satu item sebelum menyimpan nota.');
-    return;
+/* ------------------------------------------------------------------ *
+ * Tim screen
+ * ------------------------------------------------------------------ */
+
+function renderTim() {
+  const tim = currentTim();
+  if (!tim) return goHome();
+
+  const holder = findAnggota(tim, tim.holderId);
+  $('timTitle').textContent = tim.name;
+  $('timSubtitle').textContent = `${holder ? holder.name : '-'} sebagai Holder · ${tim.periods.length} periode · ${tim.members.length} anggota${tim.archivedAt ? ' · diarsipkan' : ''}`;
+
+  $('timActionBar').innerHTML = `
+    ${tim.archivedAt
+      ? `<button onclick="unarchiveCurrentTim()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1"><i data-lucide="archive-restore" class="w-3.5 h-3.5"></i> Keluarkan dari arsip</button>`
+      : `<button onclick="archiveCurrentTim()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1"><i data-lucide="archive" class="w-3.5 h-3.5"></i> Arsipkan</button>`}
+    ${canDeleteTim(tim).ok
+      ? `<button onclick="deleteCurrentTim()" class="text-xs font-semibold text-red-700 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-lg border border-red-200 transition flex items-center gap-1"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Hapus</button>`
+      : ''}
+  `;
+
+  const kasValue = kas(tim);
+  $('kasHolderValue').textContent = formatRupiah(kasValue);
+  $('kasHolderHint').textContent = `Uang yang seharusnya dipegang ${holder ? holder.name : 'Holder'} sekarang: cocokkan dengan dompet, bukan error. Dihitung dari semua periode, tidak reset per periode.`;
+
+  const net = holderNet(tim);
+  $('holderNetValue').textContent = formatRupiah(net);
+  $('handoverKasValue').textContent = formatRupiah(kasValue);
+
+  // roster
+  const roster = $('rosterList');
+  roster.innerHTML = tim.members
+    .map((member) => {
+      const color = colorOf(member.colorIndex);
+      const saldo = saldoNow(tim, member.id);
+      const saldoClass = saldo > 0 ? 'text-amber-800' : saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
+      const isCurrentHolder = isHolder(tim, member.id);
+      const statusLabel = member.status === 'keluar' ? 'keluar' : '';
+      return `
+        <div class="flex flex-wrap items-center justify-between gap-2 py-1.5 border-b border-[#E6CCB2]/60">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="px-2.5 py-1 rounded-lg text-xs font-bold ${color.bg} ${color.text}">${escapeHtml(member.name)}</span>
+            ${isCurrentHolder ? '<span class="text-[10px] font-semibold uppercase text-[#6F4E37]">Holder</span>' : ''}
+            ${statusLabel ? `<span class="text-[10px] font-semibold uppercase text-amber-700">${statusLabel}${member.leftAt ? ' · ' + formatDate(member.leftAt) : ''}</span>` : ''}
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold ${saldoClass}">${isCurrentHolder ? 'posisi ' : ''}${formatRupiah(saldo)}</span>
+            ${
+              isCurrentHolder
+                ? ''
+                : member.status === 'keluar'
+                  ? `<button onclick="reactivateAnggota('${member.id}')" class="text-[11px] font-semibold text-[#6F4E37] border border-[#E6CCB2] px-2 py-1 rounded-lg hover:bg-[#F3ECE0]">Aktifkan</button>`
+                  : `<button onclick="markAnggotaKeluar('${member.id}')" class="text-[11px] font-semibold text-[#9C6F44] border border-[#E6CCB2] px-2 py-1 rounded-lg hover:bg-[#F3ECE0]">Keluar</button>`
+            }
+          </div>
+        </div>`;
+    })
+    .join('');
+
+  // handover
+  const candidates = tim.members.filter((m) => m.id !== tim.holderId && m.status !== 'keluar');
+  $('handoverSelect').innerHTML = candidates.length
+    ? candidates.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')
+    : '<option value="">Tidak ada anggota lain yang aktif</option>';
+
+  // The log answers "who was holding the cash on a given date"; the last line
+  // is the same question asked of "now", derived from the log rather than from
+  // the stored role.
+  const holderFromLog = findAnggota(tim, holderAt(tim, null));
+  const logLines = [...tim.handovers]
+    .reverse()
+    .map((event) => {
+      const from = findAnggota(tim, event.fromId);
+      const to = findAnggota(tim, event.toId);
+      return `
+        <div class="text-[11px] text-[#3D312A] py-1 border-b border-[#E6CCB2]/40">
+          ${formatDateTime(event.at)} · ${escapeHtml(from ? from.name : '-')} → ${escapeHtml(to ? to.name : '-')}
+          ${event.note ? `<span class="block text-[#9C6F44]">${escapeHtml(event.note)}</span>` : ''}
+        </div>`;
+    })
+    .join('');
+
+  const log = $('handoverLog');
+  log.innerHTML =
+    (tim.handovers.length === 0
+      ? `<p class="text-[11px] text-[#9C6F44] italic">Belum ada serah terima. Holder pertama: ${escapeHtml(holder ? holder.name : '-')}.</p>`
+      : `<p class="text-[10px] font-semibold uppercase tracking-wide text-[#9C6F44]">Riwayat serah terima</p>${logLines}`) +
+    `<p class="text-[11px] font-semibold text-[#3D312A] pt-1">Holder sekarang menurut log: ${escapeHtml(holderFromLog ? holderFromLog.name : '-')}</p>`;
+
+  // One open Periode at a time: the new-Periode form only appears when idle.
+  $('openPeriodeForm').classList.toggle('hidden', Boolean(openPeriodeOf(tim)));
+
+  // periods
+  const periods = [...tim.periods].sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt)));
+  $('periodeList').innerHTML = periods
+    .map((periode) => {
+      const index = periodeIndex(tim, periode.id);
+      // A closed Periode's figure is its snapshot, never the current position.
+      const net = holderNetAt(tim, index);
+      const netLabel = periode.status === 'closed' ? 'Holder Net saat ditutup' : 'Holder Net berjalan';
+      const badge =
+        periode.status === 'open'
+          ? '<span class="text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full">Terbuka</span>'
+          : '<span class="text-[10px] font-semibold uppercase tracking-wide bg-[#F3ECE0] text-[#6F4E37] px-2 py-1 rounded-full">Ditutup</span>';
+      return `
+        <button onclick="openPeriode('${periode.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-3 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="font-semibold text-sm text-[#3D312A] truncate">${escapeHtml(labelOf(periode, index))}</p>
+            <p class="text-[11px] text-[#9C6F44]">
+              dibuka ${formatDate(periode.openedAt)}${periode.closedAt ? ' · ditutup ' + formatDate(periode.closedAt) : ''} · ${(periode.bills || []).length} nota · ${(periode.deposits || []).length} setoran
+              ${periode.reDerivedAt ? ' · dihitung ulang ' + formatDate(periode.reDerivedAt) : ''}
+            </p>
+            ${net !== 0 ? `<p class="text-[11px] text-[#6F4E37] mt-0.5">${netLabel} ${formatRupiah(net)}</p>` : ''}
+          </div>
+          ${badge}
+        </button>`;
+    })
+    .join('');
+}
+
+function addAnggotaToTim() {
+  const input = $('addAnggotaInput');
+  const name = input.value.trim();
+  if (!name) return;
+  const tim = currentTim();
+  const result = addAnggota(tim, { id: uid('m'), name, colorIndex: tim.members.length }, nowIso());
+  if (!result.ok) return showModal({ title: 'Tidak bisa menambah anggota', body: `<p>${escapeHtml(result.message)}</p>` });
+  commitTim(result.tim);
+  input.value = '';
+  showToast(`${name} ditambahkan ke roster.`);
+  render();
+}
+
+function markAnggotaKeluar(memberId) {
+  const tim = currentTim();
+  const result = setAnggotaStatus(tim, memberId, 'keluar', nowIso());
+  if (!result.ok) {
+    return showModal({
+      title: 'Tidak bisa menandai keluar',
+      // The domain states the reason; the app boundary formats the rupiah.
+      body: `<p>${escapeHtml(readableRefusal(result))}</p>`,
+      confirmLabel: 'Mengerti',
+    });
   }
-
-  const billData = {
-    id: editingBillId || uid('bill'),
-    merchant: appState.merchant,
-    items: JSON.parse(JSON.stringify(appState.items)),
-    tax: appState.tax,
-    service: appState.service,
-    discount: appState.discount,
-    createdAt: editingBillId
-      ? (team.bills.find(b => b.id === editingBillId)?.createdAt || new Date().toISOString())
-      : new Date().toISOString()
-  };
-
-  const idx = team.bills.findIndex(b => b.id === billData.id);
-  if (idx >= 0) team.bills[idx] = billData;
-  else team.bills.push(billData);
-
-  store = loadStore();
-  upsertTeam(store, team);
-  editingBillId = null;
-  resetBillState(false);
-  showView('team');
-  showToast('Nota tersimpan ke periode tim.');
+  commitTim(result.tim);
+  showToast('Anggota ditandai keluar. Riwayatnya tetap ada.');
+  render();
 }
 
-function confirmClosePeriod() {
-  const team = getActiveTeam();
-  if (!team) return;
-  showModal(
-    'Tutup Periode',
-    `Tutup periode "${team.name}"? Setelah ditutup, nota dan setoran menjadi read-only dan saldo vs holder akan ditampilkan.`,
-    () => {
-      team.status = 'closed';
-      team.closedAt = new Date().toISOString();
-      store = loadStore();
-      upsertTeam(store, team);
-      openSettlement(team.id);
-      showToast('Periode ditutup.');
-    }
+function reactivateAnggota(memberId) {
+  const result = setAnggotaStatus(currentTim(), memberId, 'active', nowIso());
+  if (!result.ok) return showModal({ title: 'Tidak bisa mengaktifkan', body: `<p>${escapeHtml(result.message)}</p>` });
+  commitTim(result.tim);
+  showToast('Anggota aktif kembali dengan id dan riwayat yang sama.');
+  render();
+}
+
+function confirmHandover() {
+  const tim = currentTim();
+  const toId = $('handoverSelect').value;
+  if (!toId) return showModal({ title: 'Belum ada kandidat', body: '<p>Tambahkan anggota lain yang aktif dulu.</p>' });
+  const target = findAnggota(tim, toId);
+  const kasValue = kas(tim);
+
+  showModal({
+    title: 'Konfirmasi serah terima',
+    body: `
+      <p>Kas Holder saat ini <strong>${formatRupiah(kasValue)}</strong>. Cocokkan dengan uang fisik sebelum peran berpindah.</p>
+      <p>Serahkan peran Holder kepada <strong>${escapeHtml(target ? target.name : '?')}</strong>? Saldo anggota tidak berubah.</p>`,
+    confirmLabel: 'Ya, serahkan',
+    onConfirm: () => {
+      const note = $('handoverNoteInput').value;
+      const result = handoverHolder(tim, { toId, at: nowIso(), note });
+      if (!result.ok) return showModal({ title: 'Serah terima ditolak', body: `<p>${escapeHtml(result.message)}</p>` });
+      commitTim(result.tim);
+      $('handoverNoteInput').value = '';
+      showToast('Peran Holder diserahkan.');
+      render();
+    },
+  });
+}
+
+function archiveCurrentTim() {
+  const tim = currentTim();
+  showModal({
+    title: 'Arsipkan Tim',
+    body: `<p>Arsipkan <strong>${escapeHtml(tim.name)}</strong>? Tim tetap bisa dibuka dan diedit, hanya disembunyikan dari daftar utama.</p>`,
+    confirmLabel: 'Arsipkan',
+    onConfirm: () => {
+      const result = archiveTim(currentTim(), nowIso());
+      commitTim(result.tim);
+      showToast('Tim diarsipkan.');
+      goHome();
+    },
+  });
+}
+
+function unarchiveCurrentTim() {
+  const result = unarchiveTim(currentTim());
+  commitTim(result.tim);
+  showToast('Tim keluar dari arsip.');
+  render();
+}
+
+function deleteCurrentTim() {
+  const tim = currentTim();
+  const check = canDeleteTim(tim);
+  if (!check.ok) {
+    return showModal({
+      title: 'Tidak bisa dihapus',
+      body: '<p>Tim yang punya nota, setoran, atau saldo awal manual tidak bisa dihapus. Arsipkan saja.</p>',
+    });
+  }
+  showModal({
+    title: 'Hapus Tim',
+    body: `<p>Hapus <strong>${escapeHtml(tim.name)}</strong> secara permanen? Tindakan ini tidak bisa dibatalkan.</p>`,
+    confirmLabel: 'Hapus permanen',
+    danger: true,
+    onConfirm: () => {
+      const result = deleteTim(store, tim.id);
+      if (!result.ok) return showModal({ title: 'Tidak bisa dihapus', body: `<p>${escapeHtml(result.message)}</p>` });
+      commitStore(result.store);
+      showToast('Tim dihapus.');
+      goHome();
+    },
+  });
+}
+
+function openNewPeriode() {
+  const tim = currentTim();
+  if (!tim) return goHome();
+  const label = $('newPeriodeLabel').value.trim();
+  const id = uid('per');
+  const result = openNewPeriodeDomain(tim, { id, label, openedAt: nowIso() });
+  if (!result.ok) return showModal({ title: 'Tidak bisa membuka periode', body: `<p>${escapeHtml(result.message)}</p>` });
+  commitTim(result.tim);
+  $('newPeriodeLabel').value = '';
+  activePeriodeId = id;
+  saveActive(store, activeTimId, activePeriodeId);
+  showToast('Periode baru dibuka.');
+  navigate('periode');
+}
+
+/* ------------------------------------------------------------------ *
+ * Periode screen
+ * ------------------------------------------------------------------ */
+
+function setoranParticipants(tim, periode) {
+  // Setoran is between the Holder and a participant of this Periode. A keluar
+  // Anggota carrying a Saldo is settled by adding them back as a participant
+  // first (ADR-0014 keeps the participant set as the single gate).
+  return participantsOf(tim, periode).filter((m) => m.id !== tim.holderId);
+}
+
+function renderPeriode() {
+  const tim = currentTim();
+  const periode = currentPeriode();
+  if (!tim || !periode) return goHome();
+
+  const index = periodeIndex(tim, periode.id);
+  const isOpen = periode.status === 'open';
+  const rows = settlementRows(tim, periode);
+
+  $('periodeBreadcrumb').textContent = tim.name;
+  $('periodeTitle').textContent = labelOf(periode, index);
+  $('periodeMeta').textContent =
+    `dibuka ${formatDate(periode.openedAt)}` +
+    (periode.closedAt ? ` · ditutup ${formatDate(periode.closedAt)}` : '') +
+    ` · ${(periode.bills || []).length} nota · ${(periode.deposits || []).length} setoran` +
+    (periode.reDerivedAt ? ` · dihitung ulang ${formatDate(periode.reDerivedAt)}` : '');
+
+  $('periodeActions').innerHTML = `
+    ${isOpen
+      ? `<button onclick="editPeriodeLabel()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1"><i data-lucide="pencil" class="w-3.5 h-3.5"></i> Ubah label</button>
+         <button onclick="openSettlement()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1"><i data-lucide="table" class="w-3.5 h-3.5"></i> Settlement (pratinjau)</button>
+         <button onclick="confirmClosePeriode()" class="text-xs font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-2 rounded-lg transition flex items-center gap-1"><i data-lucide="lock" class="w-3.5 h-3.5"></i> Tutup Periode</button>`
+      : `<button onclick="openSettlement()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1"><i data-lucide="table" class="w-3.5 h-3.5"></i> Settlement (snapshot)</button>
+         <button onclick="confirmReopenPeriode()" class="text-xs font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-2 rounded-lg transition flex items-center gap-1"><i data-lucide="unlock" class="w-3.5 h-3.5"></i> Buka kembali</button>`}
+  `;
+
+  // participants
+  if (!participantDraft) participantDraft = new Set(periode.participants || []);
+  $('participantsList').innerHTML = tim.members
+    .map((member) => {
+      const color = colorOf(member.colorIndex);
+      const selected = participantDraft.has(member.id);
+      const holderLocked = isHolder(tim, member.id);
+      const consumed = konsumsi(tim, periode, member.id);
+      return `
+        <button ${isOpen && !holderLocked ? `onclick="toggleParticipant('${member.id}')"` : 'disabled'}
+          class="px-3 py-1.5 rounded-xl border text-xs font-bold transition ${selected ? `${color.bg} ${color.text} ${color.border}` : 'bg-[#FDFBF7] text-[#9C6F44] border-[#E6CCB2]'} ${!isOpen || holderLocked ? 'opacity-70 cursor-default' : ''}">
+          ${escapeHtml(member.name)}${holderLocked ? ' · Holder' : ''}${consumed ? ` · ${formatRupiah(consumed)}` : ''}${selected ? '' : ' · tidak dipilih'}
+        </button>`;
+    })
+    .join('');
+  $('participantHelper').textContent = isOpen
+    ? 'Holder selalu peserta dan tidak bisa dilepas. Peserta yang sudah punya konsumsi di periode ini tidak bisa dikeluarkan.'
+    : 'Periode sudah ditutup. Buka kembali untuk mengubah peserta.';
+  $('saveParticipantsBtn').classList.toggle('hidden', !isOpen);
+
+  // nota
+  const bills = [...(periode.bills || [])].sort((a, b) =>
+    String(b.occurredAt || b.createdAt).localeCompare(String(a.occurredAt || a.createdAt))
   );
+  $('notaCount').textContent = bills.length ? `(${bills.length} nota)` : '';
+  $('notaList').innerHTML =
+    bills.length === 0
+      ? '<p class="text-sm text-[#9C6F44] italic">Belum ada nota di periode ini.</p>'
+      : bills
+          .map((nota) => {
+            const total = notaGrandTotal(nota);
+            const backdated = isBackdated(nota, tim, participantsOf(tim, periode));
+            const payers = paidByOf(nota, tim)
+              .map((row) => {
+                const member = findAnggota(tim, row.memberId);
+                return `${escapeHtml(member ? member.name : '?')} ${formatRupiah(row.amount)}`;
+              })
+              .join(', ');
+            return `
+              <div class="bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-3 flex items-start justify-between gap-2">
+                <button onclick="editNota('${nota.id}')" class="text-left min-w-0 flex-grow">
+                  <p class="font-semibold text-sm text-[#3D312A] truncate">${escapeHtml(nota.merchant || 'Nota')}</p>
+                  <p class="text-[11px] text-[#9C6F44]">${formatDate(nota.occurredAt)} · ${(nota.items || []).length} item · ${formatRupiah(total)}</p>
+                  <p class="text-[10px] text-[#9C6F44] truncate">dibayar: ${payers}</p>
+                  ${backdated ? '<span class="inline-block mt-1 text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full">Tanggal sebelum anggota bergabung</span>' : ''}
+                </button>
+                ${isOpen ? `<button onclick="removeNotaFromPeriode('${nota.id}')" class="text-[#9C6F44] hover:text-red-600 p-1 shrink-0"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
+              </div>`;
+          })
+          .join('');
+  $('addNotaBtn').classList.toggle('hidden', !isOpen);
+
+  // setoran
+  const candidates = setoranParticipants(tim, periode);
+  $('setoranMemberSelect').innerHTML = candidates.length
+    ? candidates.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')
+    : '<option value="">Tidak ada peserta non-Holder</option>';
+  $('setoranForm').classList.toggle('hidden', !isOpen);
+
+  const deposits = [...(periode.deposits || [])].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  $('setoranList').innerHTML =
+    deposits.length === 0
+      ? '<p class="text-[11px] text-[#9C6F44] italic">Belum ada setoran.</p>'
+      : deposits
+          .map((deposit) => {
+            const member = findAnggota(tim, deposit.memberId);
+            const negative = deposit.amount < 0;
+            return `
+              <div class="flex justify-between items-start gap-2 text-xs py-1.5 border-b border-[#E6CCB2]/40">
+                <div class="min-w-0">
+                  <span class="font-semibold ${negative ? 'text-red-700' : 'text-[#3D312A]'}">${escapeHtml(member ? member.name : '?')}${negative ? ' · Pengembalian' : ''}</span>
+                  <span class="block text-[10px] text-[#9C6F44]">${formatDateTime(deposit.at)}${deposit.note ? ' · ' + escapeHtml(deposit.note) : ''}</span>
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                  <span class="font-semibold ${negative ? 'text-red-700' : 'text-emerald-700'}">${formatSignedRupiah(deposit.amount)}</span>
+                </div>
+              </div>`;
+          })
+          .join('');
+
+  // balances
+  $('periodeBalances').innerHTML = rows
+    .map((row) => {
+      const color = colorOf((findAnggota(tim, row.memberId) || {}).colorIndex);
+      const saldoClass = row.saldo > 0 ? 'text-amber-800' : row.saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
+      return `
+        <div class="flex justify-between items-center gap-2 py-1.5 border-b border-[#E6CCB2]/40">
+          <div class="min-w-0">
+            <span class="px-2 py-0.5 rounded text-[11px] font-bold ${color.bg} ${color.text}">${escapeHtml(row.name)}</span>
+            ${row.isHolder ? '<span class="text-[10px] uppercase text-[#6F4E37] ml-1">Holder</span>' : ''}
+            <span class="block text-[10px] text-[#9C6F44]">awal ${formatRupiah(row.saldoAwal)} · konsumsi ${formatRupiah(row.konsumsi)} · kontribusi ${formatRupiah(row.kontribusi)}</span>
+          </div>
+          <span class="text-xs font-semibold ${saldoClass} shrink-0">${formatRupiah(row.saldo)}</span>
+        </div>`;
+    })
+    .join('');
+
+  const snapshotKas = periode.snapshot ? ` · kas saat ditutup ${formatRupiah(periode.snapshot.kas)}` : '';
+  $('periodeKasNote').textContent = `Kas Holder (Tim-wide, bukan per periode): ${formatRupiah(kas(tim))}${snapshotKas}`;
+
+  renderSaldoAwal(tim, periode, index, isOpen);
 }
 
-/* ---------- Settlement ---------- */
-function openSettlement(teamId) {
-  activeTeamId = teamId;
-  showView('settlement');
+/**
+ * Hand-entered opening balance, first Periode only (ADR-0021). Every later
+ * Periode reads its Saldo Awal from the chain and has no editor here.
+ */
+function renderSaldoAwal(tim, periode, index, isOpen) {
+  const card = $('saldoAwalCard');
+  const show = index === 0 && isOpen;
+  card.classList.toggle('hidden', !show);
+  if (!show) return;
+
+  $('saldoAwalRows').innerHTML = participantsOf(tim, periode)
+    .map((member) => {
+      const value = handEnteredOpening(tim, member.id);
+      return `
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-xs font-semibold text-[#3D312A] truncate">${escapeHtml(member.name)}
+            ${value !== 0 ? '<span class="text-[10px] font-normal text-amber-700">· diisi manual</span>' : ''}
+          </span>
+          <input type="number" value="${value || ''}" placeholder="0"
+            onchange="handleSetSaldoAwal('${member.id}', this.value)"
+            class="w-32 px-2 py-1.5 text-right bg-[#FAF6F0] border border-[#E6CCB2] rounded-lg text-xs focus:outline-none focus:border-[#6F4E37]">
+        </div>`;
+    })
+    .join('');
 }
+
+function handleSetSaldoAwal(memberId, value) {
+  const tim = currentTim();
+  const periode = currentPeriode();
+  const result = setSaldoAwal(tim, periode.id, memberId, Number(value) || 0);
+  if (!result.ok) return showModal({ title: 'Saldo Awal tidak bisa diubah', body: `<p>${escapeHtml(result.message)}</p>` });
+  commitTim(result.tim);
+  render();
+}
+
+function editPeriodeLabel() {
+  const tim = currentTim();
+  const periode = currentPeriode();
+  const value = window.prompt('Label periode (kosongkan untuk label otomatis)', periode.label || '');
+  if (value === null) return;
+  const next = { ...periode, label: value.trim() || null };
+  const updated = { ...tim, periods: tim.periods.map((p) => (p.id === periode.id ? next : p)) };
+  commitTim(updated);
+  render();
+}
+
+function toggleParticipant(memberId) {
+  if (!participantDraft) return;
+  if (participantDraft.has(memberId)) participantDraft.delete(memberId);
+  else participantDraft.add(memberId);
+  renderPeriode();
+  icons();
+}
+
+function saveParticipants() {
+  const tim = currentTim();
+  const periode = currentPeriode();
+  const result = setParticipants(tim, periode.id, [...(participantDraft || [])]);
+  if (!result.ok) {
+    return showModal({ title: 'Peserta tidak bisa disimpan', body: `<p>${escapeHtml(result.message)}</p>` });
+  }
+  commitTim(result.tim);
+  participantDraft = null;
+  showToast('Peserta periode disimpan.');
+  render();
+}
+
+function addSetoran() {
+  const tim = currentTim();
+  const periode = currentPeriode();
+  const memberId = $('setoranMemberSelect').value;
+  const amount = Number($('setoranAmount').value) || 0;
+  const note = $('setoranNote').value;
+
+  const result = addSetoranDomain(tim, periode.id, { id: uid('dep'), memberId, amount, note }, nowIso());
+  if (!result.ok) {
+    return showModal({ title: 'Setoran tidak bisa disimpan', body: `<p>${escapeHtml(result.message)}</p>` });
+  }
+  commitTim(result.tim);
+  $('setoranAmount').value = '';
+  $('setoranNote').value = '';
+  showToast('Setoran dicatat.');
+  render();
+}
+
+function removeNotaFromPeriode(notaId) {
+  const tim = currentTim();
+  const nota = (currentPeriode().bills || []).find((b) => b.id === notaId);
+  showModal({
+    title: 'Hapus Nota',
+    body: `<p>Hapus nota <strong>${escapeHtml(nota ? nota.merchant : 'ini')}</strong>? Konsumsi terkait ikut hilang.</p>`,
+    confirmLabel: 'Hapus',
+    danger: true,
+    onConfirm: () => {
+      const result = removeNota(currentTim(), activePeriodeId, notaId);
+      if (!result.ok) return showModal({ title: 'Tidak bisa menghapus', body: `<p>${escapeHtml(result.message)}</p>` });
+      commitTim(result.tim);
+      render();
+    },
+  });
+}
+
+function confirmClosePeriode() {
+  const tim = currentTim();
+  const periode = currentPeriode();
+  const rows = settlementRows(tim, periode);
+  const net = holderNetAt(tim, periodeIndex(tim, periode.id));
+  showModal({
+    title: 'Tutup Periode',
+    body: `
+      <p>Snapshot Settlement akan disimpan: ${rows.length} peserta, ${(periode.bills || []).length} nota.</p>
+      <p>Setelah ditutup, nota dan setoran tidak bisa diubah sampai periode dibuka kembali.</p>
+      <p class="text-xs text-[#9C6F44]">Holder Net saat ini ${formatRupiah(net)}. Tidak ada syarat "harus balance".</p>`,
+    confirmLabel: 'Tutup periode',
+    onConfirm: () => {
+      const result = closePeriode(currentTim(), periode.id, nowIso());
+      if (!result.ok) return showModal({ title: 'Tidak bisa menutup', body: `<p>${escapeHtml(result.message)}</p>` });
+      commitTim(result.tim);
+      showToast('Periode ditutup dan Settlement disimpan.');
+      render();
+    },
+  });
+}
+
+function confirmReopenPeriode() {
+  const tim = currentTim();
+  const periode = currentPeriode();
+  const cascade = cascadePreview(tim, periode.id);
+
+  const cascadeHtml = cascade.length
+    ? `<p class="font-semibold">Periode berikut ikut berubah Saldo Awal-nya:</p>
+       <ul class="text-xs space-y-1">
+         ${cascade
+           .map(
+             (item) =>
+               `<li>• ${escapeHtml(labelOf({ ...tim.periods[item.index] }, item.index))} — ${item.status === 'closed' ? `terakhir dihitung ${formatDate(item.lastDerivedAt)}` : 'masih terbuka'}</li>`
+           )
+           .join('')}
+       </ul>
+       <p class="text-xs text-[#9C6F44]">Setoran dan Pengembalian tidak berubah. Hanya Saldo Awal yang ikut rantai.</p>`
+    : '<p>Tidak ada periode setelah ini, jadi tidak ada Saldo Awal yang ikut berubah.</p>';
+
+  showModal({
+    title: 'Buka kembali Periode',
+    body: `<p>Buka kembali <strong>${escapeHtml(labelOf(periode, periodeIndex(tim, periode.id)))}</strong>? Snapshot yang lama tidak lagi ditampilkan.</p>${cascadeHtml}`,
+    confirmLabel: 'Buka kembali',
+    onConfirm: () => {
+      const result = reopenPeriode(currentTim(), periode.id, nowIso());
+      if (!result.ok) return showModal({ title: 'Tidak bisa membuka', body: `<p>${escapeHtml(result.message)}</p>` });
+      commitTim(result.tim);
+      showToast('Periode dibuka kembali.');
+      render();
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Settlement
+ * ------------------------------------------------------------------ */
 
 function renderSettlement() {
-  const team = getActiveTeam();
-  if (!team) return;
-  const settlement = calculateTeamSettlement(team);
-  document.getElementById('settlementTitle').innerText = team.name;
-  document.getElementById('settlementSubtitle').innerText = team.status === 'closed'
-    ? `Periode ditutup · ${team.bills.length} nota`
-    : `Pratinjau saldo · ${team.bills.length} nota`;
+  const tim = currentTim();
+  const periode = currentPeriode();
+  if (!tim || !periode) return goHome();
 
-  const holderName = settlement.holder ? settlement.holder.name : 'Holder';
-  const list = document.getElementById('settlementList');
-  list.innerHTML = settlement.rows.map(r => {
-    if (r.isHolder) {
+  const index = periodeIndex(tim, periode.id);
+  const rows = settlementRows(tim, periode);
+  const isClosed = periode.status === 'closed';
+  const reDerived = rows.some((row) => row.source === 're-derived');
+  const holder = findAnggota(tim, tim.holderId);
+
+  $('settlementTitle').textContent = labelOf(periode, index);
+  $('settlementSubtitle').textContent = `${tim.name} · ${(periode.bills || []).length} nota · Holder: ${holder ? holder.name : '-'}`;
+  $('settlementBadge').textContent = isClosed
+    ? `Snapshot · ditutup ${formatDate(periode.closedAt)}${reDerived ? ` · dihitung ulang ${formatDate(periode.reDerivedAt)} dari rantai Saldo Awal` : ''}`
+    : 'Pratinjau · dihitung langsung, belum jadi pernyataan';
+
+  $('settlementRows').innerHTML = rows
+    .map((row) => {
+      const color = colorOf((findAnggota(tim, row.memberId) || {}).colorIndex);
+      const saldoClass = row.saldo > 0 ? 'text-amber-800' : row.saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
+      // The Holder's sign is a position, not a debt: never present it as a Saldo.
+      const saldoLabel = row.isHolder
+        ? 'Posisi Holder · bukan utang'
+        : row.saldo > 0
+          ? `Utang ke ${escapeHtml(holder ? holder.name : 'Holder')}`
+          : row.saldo < 0
+            ? 'Kredit dari Holder'
+            : 'Lunas';
       return `
-        <div class="bg-[#F3ECE0] border border-[#E6CCB2] rounded-xl p-4 space-y-2">
-          <div class="flex justify-between items-center">
-            <span class="font-bold text-[#3D312A]">${escapeHtml(r.member.name)} · Pemegang Dana</span>
-            <span class="text-sm font-bold text-[#6F4E37]">Net ${formatRupiah(settlement.holderNet)}</span>
+        <div class="rounded-xl p-4 border ${row.isHolder ? 'border-[#D4A373] bg-[#F3ECE0]' : 'border-[#E6CCB2] bg-[#FAF6F0]'} space-y-2">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <span class="px-2.5 py-1 rounded-lg text-xs font-bold ${color.bg} ${color.text}">${escapeHtml(row.name)}</span>
+              ${row.isHolder ? '<span class="text-[10px] font-semibold uppercase text-[#6F4E37]">Holder</span>' : ''}
+              ${row.status === 'keluar' ? '<span class="text-[10px] font-semibold uppercase text-amber-700">keluar</span>' : ''}
+            </div>
+            <div class="text-right">
+              <p class="text-sm font-bold ${saldoClass}">${formatRupiah(row.saldo)}</p>
+              <p class="text-[10px] text-[#9C6F44]">${saldoLabel}</p>
+            </div>
           </div>
-          <p class="text-xs text-[#9C6F44]">Masih ditagih: ${formatRupiah(settlement.owedToHolder)} · Kredit anggota: ${formatRupiah(settlement.creditFromHolder)}</p>
-          <p class="text-xs text-[#6F4E37]">Konsumsi sendiri: ${formatRupiah(r.consumed)}</p>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px]">
+            <div><span class="text-[#9C6F44] block">Saldo Awal</span><span class="font-semibold">${formatRupiah(row.saldoAwal)}</span>${row.handEnteredAwal ? '<span class="block text-[9px] text-amber-700">diisi manual</span>' : ''}</div>
+            <div><span class="text-[#9C6F44] block">Konsumsi</span><span class="font-semibold">${formatRupiah(row.konsumsi)}</span></div>
+            <div><span class="text-[#9C6F44] block">Kontribusi</span><span class="font-semibold">${formatRupiah(row.kontribusi)}</span></div>
+            <div><span class="text-[#9C6F44] block">${row.isHolder ? 'Posisi Holder' : 'Saldo berjalan'}</span><span class="font-semibold ${saldoClass}">${formatRupiah(row.saldo)}</span></div>
+          </div>
         </div>`;
-    }
-    let msg, cls;
-    if (r.saldo > 0) {
-      msg = `Masih berutang ke ${holderName}: ${formatRupiah(r.saldo)}`;
-      cls = 'border-amber-300 bg-amber-50';
-    } else if (r.saldo < 0) {
-      msg = `Kelebihan setoran (kredit dari ${holderName}): ${formatRupiah(Math.abs(r.saldo))}`;
-      cls = 'border-emerald-300 bg-emerald-50';
-    } else {
-      msg = `Lunas dengan ${holderName}`;
-      cls = 'border-[#E6CCB2] bg-[#FAF6F0]';
-    }
-    return `
-      <div class="rounded-xl p-4 border ${cls} space-y-1">
-        <p class="font-bold text-[#3D312A]">${escapeHtml(r.member.name)}</p>
-        <p class="text-xs text-[#9C6F44]">Konsumsi ${formatRupiah(r.consumed)} · Setoran ${formatRupiah(r.deposited)}</p>
-        <p class="text-sm font-semibold text-[#3D312A]">${msg}</p>
+    })
+    .join('');
+
+  // Cara bayar paling ringkas — derived, never stored, secondary to vs-Holder.
+  const transfers = minimalTransfers(rows);
+  const block = $('minimalTransfers');
+  if (transfers.length === 0) {
+    block.innerHTML = '';
+  } else {
+    block.innerHTML = `
+      <div class="bg-[#F3ECE0] border border-[#E6CCB2] rounded-xl p-4 space-y-2">
+        <p class="text-xs font-bold text-[#3D312A]">Cara bayar paling ringkas</p>
+        <p class="text-[10px] text-[#9C6F44]">${isClosed ? `Dihitung dari saldo saat periode ditutup (${formatDate(periode.closedAt)}), bukan saran saat ini.` : 'Dihitung dari saldo berjalan sekarang. Ini saran antar-anggota, bukan pengganti daftar vs Holder.'}</p>
+        ${transfers
+          .map((transfer) => {
+            const from = findAnggota(tim, transfer.fromId);
+            const to = findAnggota(tim, transfer.toId);
+            return `<p class="text-xs text-[#3D312A]">${escapeHtml(from ? from.name : '?')} → ${escapeHtml(to ? to.name : '?')}: <strong>${formatRupiah(transfer.amount)}</strong></p>`;
+          })
+          .join('')}
       </div>`;
-  }).join('');
+  }
+
+  const net = holderNetAt(tim, index);
+  const outstanding = outstandingAt(tim, index);
+  $('settlementMeta').innerHTML = `
+    <div class="bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4">
+      <p class="text-[10px] font-semibold uppercase tracking-wider text-[#9C6F44]">Holder Net — akan ditagih</p>
+      <p class="text-lg font-bold text-[#6F4E37]">${formatRupiah(net)}</p>
+      <p class="text-[10px] text-[#9C6F44]">Ditagih ${formatRupiah(outstanding.owed)} · kredit ${formatRupiah(outstanding.credit)} · konsumsi Holder sendiri tidak dihitung utang</p>
+    </div>
+    <div class="bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4">
+      <p class="text-[10px] font-semibold uppercase tracking-wider text-[#9C6F44]">Kas Holder — uang yang dipegang</p>
+      <p class="text-lg font-bold text-[#3D312A]">${formatRupiah(kas(tim))}</p>
+      <p class="text-[10px] text-[#9C6F44]">Tim-wide, tidak reset per periode. Cocokkan dengan uang fisik di dompet — ini petunjuk rekonsiliasi, bukan error. Angka terpisah dari Holder Net.</p>
+    </div>`;
 }
 
 function copySettlementWA() {
-  const team = getActiveTeam();
-  if (!team) return;
-  const settlement = calculateTeamSettlement(team);
-  const holderName = settlement.holder ? settlement.holder.name : 'Holder';
-  let text = `📒 *SETTLEMENT TIM - ${team.name.toUpperCase()}*\n`;
-  text += `Pemegang dana: *${holderName}*\n`;
-  text += `-----------------------------------------\n`;
-  settlement.rows.forEach(r => {
-    if (r.isHolder) {
-      text += `💼 *${r.member.name}* (Holder)\n`;
-      text += `  Konsumsi: ${formatRupiah(r.consumed)}\n`;
-      text += `  Net posisi: ${formatRupiah(settlement.holderNet)}\n`;
-    } else if (r.saldo > 0) {
-      text += `👤 *${r.member.name}*\n`;
-      text += `  Konsumsi: ${formatRupiah(r.consumed)} | Setor: ${formatRupiah(r.deposited)}\n`;
-      text += `  *Masih utang ke ${holderName}: ${formatRupiah(r.saldo)}*\n`;
-    } else if (r.saldo < 0) {
-      text += `👤 *${r.member.name}*\n`;
-      text += `  Konsumsi: ${formatRupiah(r.consumed)} | Setor: ${formatRupiah(r.deposited)}\n`;
-      text += `  *Kredit dari ${holderName}: ${formatRupiah(Math.abs(r.saldo))}*\n`;
-    } else {
-      text += `👤 *${r.member.name}* — Lunas\n`;
+  const tim = currentTim();
+  const periode = currentPeriode();
+  if (!tim || !periode) return;
+  const index = periodeIndex(tim, periode.id);
+  const rows = settlementRows(tim, periode);
+  const holder = findAnggota(tim, tim.holderId);
+  const holderName = whatsappSafe(holder ? holder.name : 'Holder');
+  const isClosed = periode.status === 'closed';
+  const transfers = minimalTransfers(rows);
+
+  // WhatsApp renders plain text, so free text is stripped of line breaks and
+  // emphasis markers rather than HTML-escaped (which would print literally).
+  let text = `📒 *SETTLEMENT — ${whatsappSafe(tim.name)}*\n`;
+  text += `Periode: ${whatsappSafe(labelOf(periode, index))}${isClosed ? ` (snapshot ${formatDate(periode.closedAt)})` : ' (pratinjau)'}\n`;
+  text += `Holder: *${holderName}*\n`;
+  text += '-----------------------------------------\n';
+
+  for (const row of rows) {
+    if (row.isHolder) continue;
+    const label = row.saldo > 0 ? `utang ke ${holderName}` : row.saldo < 0 ? `kredit dari ${holderName}` : 'lunas';
+    text += `👤 *${whatsappSafe(row.name)}*\n`;
+    text += `   Saldo awal ${formatRupiah(row.saldoAwal)} · konsumsi ${formatRupiah(row.konsumsi)} · kontribusi ${formatRupiah(row.kontribusi)}\n`;
+    text += `   *Saldo berjalan: ${formatRupiah(row.saldo)} (${label})*\n`;
+    text += '-----------------------------------------\n';
+  }
+
+  if (holder) {
+    text += `💼 *${holderName}* (Holder)\n`;
+    text += `   konsumsi sendiri ${formatRupiah(konsumsi(tim, periode, holder.id))}\n`;
+    text += `   net akan ditagih: ${formatRupiah(holderNetAt(tim, index))}\n`;
+    text += `   kas yang dipegang: ${formatRupiah(kas(tim))}\n`;
+  }
+
+  if (transfers.length > 0) {
+    text += '-----------------------------------------\n';
+    text += `🔁 *Cara bayar paling ringkas* (${isClosed ? 'per saat penutupan' : 'dari saldo berjalan'}):\n`;
+    for (const transfer of transfers) {
+      const from = findAnggota(tim, transfer.fromId);
+      const to = findAnggota(tim, transfer.toId);
+      text += `   ${whatsappSafe(from ? from.name : '?')} → ${whatsappSafe(to ? to.name : '?')}: ${formatRupiah(transfer.amount)}\n`;
     }
-    text += `-----------------------------------------\n`;
-  });
-  text += `_Dihitung via BagiRata.ai_`;
+  }
+
+  text += '-----------------------------------------\n';
+  text += `Transfer utama ke *${holderName}*. Dihitung via BagiRata.ai.`;
   copyToClipboard(text);
-  showToast('Ringkasan settlement disalin!');
+  showToast('Ringkasan Settlement disalin!');
 }
 
-/* ---------- Bill editor (shared) ---------- */
-function resetBillState(clearFriends) {
-  appState = {
+/* ------------------------------------------------------------------ *
+ * Nota editor
+ * ------------------------------------------------------------------ */
+
+function blankNota() {
+  return {
+    id: uid('nota'),
     merchant: 'Restoran / Kafe',
     items: [],
-    friends: clearFriends ? [] : appState.friends,
     tax: 0,
     service: 0,
-    discount: 0
+    discount: 0,
+    occurredAt: nowIso(),
+    createdAt: nowIso(),
+    paidBy: [],
   };
-  const tax = document.getElementById('taxInput');
-  const svc = document.getElementById('serviceInput');
-  const disc = document.getElementById('discountInput');
-  const file = document.getElementById('fileInput');
-  const galFile = document.getElementById('galleryInput');
-  if (tax) tax.value = '';
-  if (svc) svc.value = '';
-  if (disc) disc.value = '';
-  if (file) file.value = '';
-  if (galFile) galFile.value = '';
-  updateTeamBillChrome();
 }
 
-function confirmResetData() {
-  showModal('Konfirmasi Reset', 'Apakah Anda yakin ingin menghapus data nota saat ini?', () => {
-    const keepFriends = sessionMode === 'teamBill' ? [...appState.friends] : [];
-    resetBillState(sessionMode !== 'teamBill');
-    if (sessionMode === 'teamBill') appState.friends = keepFriends;
-    document.getElementById('uploadSection').classList.remove('hidden');
-    document.getElementById('editorSection').classList.add('hidden');
-    document.getElementById('loadingSection').classList.add('hidden');
-    showToast('Data nota dibersihkan.');
+function startUpload() {
+  navigate('upload');
+}
+
+function renderUpload() {
+  $('uploadTitle').textContent = oneOff ? 'Split Sekali Pakai' : 'Tambah Nota';
+  $('uploadSubtitle').textContent = oneOff
+    ? 'Foto nota atau isi manual. Mode sekali pakai tidak menyimpan apa pun ke perangkat.'
+    : 'Foto nota, unggah gambar, atau isi manual.';
+  icons();
+}
+
+function startManualNota() {
+  const tim = currentTim();
+  if (!tim) return goHome();
+  const periode = currentPeriode();
+  if (!periode) {
+    return showModal({ title: 'Belum ada periode', body: '<p>Buka periode baru dulu sebelum menambah nota.</p>' });
+  }
+  if (periode.status !== 'open') {
+    return showModal({
+      title: 'Periode sudah ditutup',
+      body: '<p>Buka kembali periode, perbaiki, lalu tutup lagi. Nota tidak bisa ditulis ke periode tertutup.</p>',
+    });
+  }
+
+  draft = {
+    periodeId: periode.id,
+    notaId: null,
+    nota: blankNota(),
+    payersAuto: true,
+    fuente: 'manual',
+  };
+  syncDraftPayerDefault();
+  navigate('editor');
+}
+
+function editNota(notaId) {
+  const tim = currentTim();
+  const periode = currentPeriode();
+  if (!tim || !periode) return;
+  if (periode.status !== 'open') {
+    return showModal({
+      title: 'Periode sudah ditutup',
+      body: '<p>Buka kembali periode dulu kalau nota ini perlu diperbaiki.</p>',
+    });
+  }
+  const nota = (periode.bills || []).find((b) => b.id === notaId);
+  if (!nota) return;
+  draft = {
+    periodeId: periode.id,
+    notaId,
+    nota: {
+      ...JSON.parse(JSON.stringify(nota)),
+      paidBy: paidByOf(nota, tim).map((row) => ({ ...row })),
+    },
+    payersAuto: false,
+    fuente: 'edit',
+  };
+  navigate('editor');
+}
+
+function editorTim() {
+  return currentTim();
+}
+
+function editorPeriode() {
+  const tim = editorTim();
+  if (!tim) return null;
+  if (oneOff) return tim.periods[0];
+  return findPeriode(tim, draft.periodeId);
+}
+
+function editorParticipants() {
+  const tim = editorTim();
+  const periode = editorPeriode();
+  if (!tim || !periode) return [];
+  if (oneOff) return tim.members;
+  return participantsOf(tim, periode);
+}
+
+function syncDraftPayerDefault() {
+  if (!draft) return;
+  const tim = editorTim();
+  const total = notaGrandTotal(draft.nota);
+  if (draft.payersAuto) {
+    const holder = tim ? findAnggota(tim, tim.holderId) : null;
+    draft.nota.paidBy = holder && total !== 0 ? [{ memberId: holder.id, amount: total }] : [];
+  }
+}
+
+function draftChange(field, value) {
+  if (!draft) return;
+  if (['tax', 'service', 'discount'].includes(field)) draft.nota[field] = Math.max(0, Number(value) || 0);
+  else if (field === 'occurredAt') draft.nota.occurredAt = value || draft.nota.occurredAt;
+  else draft.nota[field] = value;
+
+  if (field === 'merchant') {
+    // Cosmetic only: totals, payers and the back-date badge are unaffected.
+    renderEditorSummary();
+    return;
+  }
+  syncDraftPayerDefault();
+  renderEditor();
+}
+
+function renderEditor() {
+  const tim = editorTim();
+  const periode = editorPeriode();
+  if (!draft || !tim || !periode) return goHome();
+
+  $('merchantName').value = draft.nota.merchant || '';
+  $('notaDateInput').value = toDateInputValue(draft.nota.occurredAt);
+  $('editorContext').textContent = oneOff
+    ? 'Mode sekali pakai · tidak disimpan'
+    : `${tim.name} · ${labelOf(periode, periodeIndex(tim, periode.id))}`;
+  $('editorRosterTitle').textContent = oneOff ? 'Anggota (sekali pakai)' : 'Peserta Periode';
+  $('editorAddMemberWrap').classList.toggle('hidden', !oneOff);
+  $('taxInput').value = draft.nota.tax || '';
+  $('serviceInput').value = draft.nota.service || '';
+  $('discountInput').value = draft.nota.discount || '';
+  $('editorAddMemberWrap').classList.toggle('flex', oneOff);
+
+  renderItems();
+  renderPayerRows();
+  renderEditorRoster();
+  renderEditorSummary();
+  renderBackdateWarning();
+  icons();
+}
+
+function renderItems() {
+  const participants = editorParticipants();
+  const container = $('itemList');
+  if (draft.nota.items.length === 0) {
+    container.innerHTML = '<div class="text-center py-6 text-xs text-[#9C6F44]">Belum ada item. Klik "Tambah" atau isi manual.</div>';
+    return;
+  }
+
+  container.innerHTML = draft.nota.items
+    .map((item) => {
+      const unassigned = (item.assignedTo || []).length === 0;
+      return `
+        <div class="bg-[#FAF6F0] p-3.5 rounded-xl border ${unassigned ? 'border-amber-400/70 bg-amber-50/30' : 'border-[#E6CCB2]'} space-y-2.5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <input type="text" value="${escapeHtml(item.name)}" onchange="updateItem('${item.id}', 'name', this.value)" class="w-full font-semibold text-sm text-[#3D312A] bg-transparent border-b border-transparent hover:border-[#E6CCB2] focus:border-[#6F4E37] focus:outline-none px-1 py-0.5 rounded">
+            <div class="flex items-center gap-2 justify-between sm:justify-end">
+              <div class="flex items-center bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg">
+                <button onclick="updateItem('${item.id}', 'qty', ${item.qty - 1})" class="px-2 py-0.5 text-xs text-[#6F4E37] hover:bg-[#F3ECE0] rounded-l-lg font-bold">-</button>
+                <span class="px-2 text-xs font-semibold text-[#3D312A]">${item.qty}</span>
+                <button onclick="updateItem('${item.id}', 'qty', ${item.qty + 1})" class="px-2 py-0.5 text-xs text-[#6F4E37] hover:bg-[#F3ECE0] rounded-r-lg font-bold">+</button>
+              </div>
+              <input type="number" value="${item.price}" onchange="updateItem('${item.id}', 'price', this.value)" class="w-24 px-2 py-1 text-right text-xs font-semibold bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg focus:outline-none focus:border-[#6F4E37]">
+              <span class="text-xs font-bold text-[#3D312A] w-24 text-right">${formatRupiah(itemLineTotal(item))}</span>
+              <button onclick="removeItem('${item.id}')" class="text-[#9C6F44] hover:text-red-600 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+            </div>
+          </div>
+          <div class="pt-2 border-t border-[#E6CCB2]/60 flex flex-wrap items-center gap-1.5">
+            <span class="text-[11px] font-semibold text-[#9C6F44] mr-1">Pemilih:</span>
+            ${participants
+              .map((member) => {
+                const color = colorOf(member.colorIndex);
+                const chosen = (item.assignedTo || []).includes(member.id);
+                return `<button onclick="toggleItemAssignment('${item.id}', '${member.id}')" class="text-[11px] font-semibold px-2.5 py-1 rounded-full border transition flex items-center gap-1 ${chosen ? `${color.bg} ${color.text} ${color.border}` : 'bg-[#FDFBF7] text-[#6F4E37] border-[#E6CCB2] hover:bg-[#F3ECE0]'}">
+                  ${escapeHtml(member.name)}${chosen ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''}
+                </button>`;
+              })
+              .join('')}
+            ${participants.length === 0 ? '<span class="text-[11px] text-[#9C6F44] italic">' + (oneOff ? 'Tambahkan anggota dulu.' : 'Periode ini belum punya peserta.') + '</span>' : ''}
+          </div>
+        </div>`;
+    })
+    .join('');
+}
+
+function renderPayerRows() {
+  const participants = editorParticipants();
+  const container = $('payerRows');
+  if (draft.nota.paidBy.length === 0) {
+    container.innerHTML = '<p class="text-[11px] text-[#9C6F44] italic">Belum ada pembayar. Tambahkan satu baris; default-nya Holder membayar seluruh nota.</p>';
+  } else {
+    container.innerHTML = draft.nota.paidBy
+      .map(
+        (row, index) => `
+        <div class="flex gap-2 items-center">
+          <select onchange="updatePayer(${index}, 'memberId', this.value)" class="flex-grow px-2 py-1.5 bg-[#FAF6F0] border border-[#E6CCB2] rounded-lg text-xs focus:outline-none focus:border-[#6F4E37]">
+            ${participants.map((m) => `<option value="${m.id}" ${m.id === row.memberId ? 'selected' : ''}>${escapeHtml(m.name)}</option>`).join('')}
+          </select>
+          <input type="number" value="${row.amount}" onchange="updatePayer(${index}, 'amount', this.value)" class="w-28 px-2 py-1.5 text-right bg-[#FAF6F0] border border-[#E6CCB2] rounded-lg text-xs focus:outline-none focus:border-[#6F4E37]">
+          <button onclick="removePayerRow(${index})" class="text-[#9C6F44] hover:text-red-600 p-1"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+        </div>`
+      )
+      .join('');
+  }
+
+  const total = notaGrandTotal(draft.nota);
+  const paid = paidByTotal(draft.nota);
+  const remainder = total - paid;
+  const box = $('payerRemainder');
+  if (remainder === 0) {
+    box.className = 'text-xs font-semibold rounded-lg px-3 py-2 border bg-emerald-50 border-emerald-300 text-emerald-800';
+    box.textContent = 'Pembayar pas dengan total nota.';
+  } else if (remainder > 0) {
+    box.className = 'text-xs font-semibold rounded-lg px-3 py-2 border bg-amber-50 border-amber-300 text-amber-800';
+    box.textContent = `Sisa belum terbayar: ${formatRupiah(remainder)} dari total ${formatRupiah(total)}.`;
+  } else {
+    box.className = 'text-xs font-semibold rounded-lg px-3 py-2 border bg-amber-50 border-amber-300 text-amber-800';
+    box.textContent = `Kelebihan bayar: ${formatRupiah(-remainder)} di atas total ${formatRupiah(total)}.`;
+  }
+}
+
+function renderEditorRoster() {
+  const tim = editorTim();
+  const participants = editorParticipants();
+  $('editorRoster').innerHTML =
+    participants.length === 0
+      ? '<span class="text-xs text-[#9C6F44] italic">Belum ada anggota.</span>'
+      : participants
+          .map((member) => {
+            const color = colorOf(member.colorIndex);
+            return `<span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shadow-sm ${color.bg} ${color.text} ${color.border}">
+              ${escapeHtml(member.name)}${isHolder(tim, member.id) ? ' · Holder' : ''}
+            </span>`;
+          })
+          .join('');
+}
+
+function renderEditorSummary() {
+  if (!draft) return;
+  const tim = editorTim();
+  const { rows, grandTotal } = notaBreakdown(draft.nota, tim);
+  $('grandTotalDisplay').textContent = formatRupiah(grandTotal);
+
+  const unassigned = draft.nota.items.filter((item) => (item.assignedTo || []).length === 0).length;
+  const pill = $('statusPill');
+  const statusText = $('statusText');
+  if (unassigned > 0) {
+    pill.className = 'px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300';
+    statusText.textContent = `${unassigned} item belum ada pemilih`;
+  } else if (rows.length === 0) {
+    pill.className = 'px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 bg-[#F3ECE0] text-[#6F4E37] border border-[#E6CCB2]';
+    statusText.textContent = 'Belum ada item';
+  } else {
+    pill.className = 'px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300';
+    statusText.textContent = 'Siap disimpan';
+  }
+
+  $('editorSummary').innerHTML =
+    rows.length === 0
+      ? '<p class="text-xs text-[#9C6F44] italic">Belum ada rincian.</p>'
+      : rows
+          .map((row) => {
+            const member = findAnggota(tim, row.memberId);
+            return `
+              <div class="bg-[#FAF6F0] rounded-xl border border-[#E6CCB2] p-3 space-y-1">
+                <div class="flex justify-between items-center gap-2">
+                  <span class="text-xs font-bold text-[#3D312A]">${escapeHtml(member ? member.name : '?')}</span>
+                  <span class="text-sm font-bold text-[#6F4E37]">${formatRupiah(row.total)}</span>
+                </div>
+                <p class="text-[10px] text-[#9C6F44]">item ${formatRupiah(row.subtotal)}${row.tax ? ` · pajak ${formatRupiah(row.tax)}` : ''}${row.service ? ` · layanan ${formatRupiah(row.service)}` : ''}${row.discount ? ` · diskon ${formatRupiah(row.discount)}` : ''}</p>
+              </div>`;
+          })
+          .join('');
+}
+
+function isBackdated(nota, tim, participants) {
+  const occurred = nota.occurredAt || nota.createdAt;
+  if (!occurred) return false;
+  const touched = new Set();
+  (nota.items || []).forEach((item) => (item.assignedTo || []).forEach((id) => touched.add(id)));
+  (nota.paidBy || []).forEach((row) => touched.add(row.memberId));
+  return [...touched].some((memberId) => {
+    const member = findAnggota(tim, memberId);
+    return member && member.joinedAt && String(occurred) < String(member.joinedAt);
   });
 }
 
-function showModal(title, bodyText, onConfirm = null) {
-  document.getElementById('modalTitle').innerText = title;
-  document.getElementById('modalBody').innerText = bodyText;
-  const actionsContainer = document.getElementById('modalActions');
-  if (onConfirm) {
-    actionsContainer.innerHTML = `
-      <button onclick="closeModal()" class="px-3 py-1.5 bg-[#FAF6F0] text-[#6F4E37] border border-[#E6CCB2] font-semibold text-xs rounded-xl hover:bg-[#F3ECE0] transition">Batal</button>
-      <button id="modalConfirmBtn" class="px-4 py-1.5 bg-[#6F4E37] text-[#FDFBF7] font-semibold text-xs rounded-xl hover:bg-[#5C3D2E] transition">Ya, Lanjutkan</button>`;
-    document.getElementById('modalConfirmBtn').onclick = function () {
-      closeModal();
-      onConfirm();
-    };
+function renderBackdateWarning() {
+  const tim = editorTim();
+  const box = $('backdateWarning');
+  if (isBackdated(draft.nota, tim, editorParticipants())) {
+    box.classList.remove('hidden');
+    box.innerHTML =
+      '<strong>Tanggal nota sebelum ada anggota bergabung.</strong> Nota tetap bisa disimpan, tapi periksa lagi siapa yang menanggung item ini.';
   } else {
-    actionsContainer.innerHTML = `
-      <button onclick="closeModal()" class="px-4 py-1.5 bg-[#6F4E37] text-[#FDFBF7] font-semibold text-xs rounded-xl hover:bg-[#5C3D2E] transition">Mengerti</button>`;
+    box.classList.add('hidden');
+    box.innerHTML = '';
   }
-  const modal = document.getElementById('customModal');
-  modal.classList.remove('hidden');
-  setTimeout(() => {
-    modal.classList.remove('opacity-0');
-    document.getElementById('modalContent').classList.remove('scale-95');
-  }, 10);
 }
 
-function closeModal() {
-  const modal = document.getElementById('customModal');
-  modal.classList.add('opacity-0');
-  document.getElementById('modalContent').classList.add('scale-95');
-  setTimeout(() => modal.classList.add('hidden'), 200);
+function addNewItem() {
+  draft.nota.items.push({ id: uid('item'), name: 'Item baru', qty: 1, price: 0, assignedTo: [] });
+  syncDraftPayerDefault();
+  renderEditor();
 }
 
-function showToast(message) {
-  const toast = document.getElementById('toast');
-  document.getElementById('toastMessage').innerText = message;
-  toast.classList.remove('translate-y-20', 'opacity-0');
-  setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
+function updateItem(itemId, field, value) {
+  const item = draft.nota.items.find((i) => i.id === itemId);
+  if (!item) return;
+  if (field === 'qty') item.qty = Math.max(1, Number(value) || 1);
+  else if (field === 'price') item.price = Math.max(0, Number(value) || 0);
+  else item.name = value;
+  syncDraftPayerDefault();
+  renderEditor();
 }
 
-/* ---------- Camera (getUserMedia) ---------- */
+function removeItem(itemId) {
+  draft.nota.items = draft.nota.items.filter((i) => i.id !== itemId);
+  syncDraftPayerDefault();
+  renderEditor();
+}
+
+function toggleItemAssignment(itemId, memberId) {
+  const item = draft.nota.items.find((i) => i.id === itemId);
+  if (!item) return;
+  const index = item.assignedTo.indexOf(memberId);
+  if (index >= 0) item.assignedTo.splice(index, 1);
+  else item.assignedTo.push(memberId);
+  renderEditor();
+}
+
+function bagiRataUnassigned() {
+  const participants = editorParticipants();
+  if (participants.length === 0) {
+    return showModal({ title: 'Belum ada peserta', body: '<p>Tambahkan anggota atau peserta periode dulu.</p>' });
+  }
+  let count = 0;
+  draft.nota.items.forEach((item) => {
+    if ((item.assignedTo || []).length === 0) {
+      item.assignedTo = participants.map((m) => m.id);
+      count += 1;
+    }
+  });
+  renderEditor();
+  showToast(count ? `${count} item dibagi rata ke ${participants.length} peserta periode ini.` : 'Semua item sudah punya pemilih.');
+}
+
+function addPayerRow() {
+  const participants = editorParticipants();
+  if (participants.length === 0) return showModal({ title: 'Belum ada peserta', body: '<p>Tambahkan anggota dulu.</p>' });
+  const used = new Set(draft.nota.paidBy.map((row) => row.memberId));
+  const next = participants.find((m) => !used.has(m.id)) || participants[0];
+  draft.nota.paidBy.push({ memberId: next.id, amount: 0 });
+  draft.payersAuto = false;
+  renderEditor();
+}
+
+function updatePayer(index, field, value) {
+  const row = draft.nota.paidBy[index];
+  if (!row) return;
+  if (field === 'amount') row.amount = Math.max(0, Number(value) || 0);
+  else row.memberId = value;
+  draft.payersAuto = false;
+  renderPayerRows();
+  icons();
+}
+
+function removePayerRow(index) {
+  draft.nota.paidBy.splice(index, 1);
+  draft.payersAuto = false;
+  renderEditor();
+}
+
+function addEditorMember() {
+  if (!oneOff) return;
+  const input = $('editorMemberInput');
+  const name = input.value.trim();
+  if (!name) return;
+  const tim = editorTim();
+  const result = addAnggota(tim, { id: uid('m'), name, colorIndex: tim.members.length }, nowIso());
+  if (!result.ok) return showModal({ title: 'Tidak bisa menambah', body: `<p>${escapeHtml(result.message)}</p>` });
+  let next = result.tim;
+  if (!next.holderId) next = { ...next, holderId: next.members[next.members.length - 1].id };
+  oneOff.tim = next;
+  input.value = '';
+  syncDraftPayerDefault();
+  renderEditor();
+}
+
+function cancelEditor() {
+  draft = null;
+  if (oneOff) navigate('upload', { replace: true });
+  else navigate('periode', { replace: true });
+}
+
+function confirmResetDraft() {
+  showModal({
+    title: 'Reset nota',
+    body: '<p>Kosongkan item, pajak, dan pembayar pada nota ini?</p>',
+    confirmLabel: 'Reset',
+    onConfirm: () => {
+      const id = draft.nota.id;
+      const createdAt = draft.nota.createdAt;
+      draft.nota = { ...blankNota(), id, createdAt };
+      draft.payersAuto = true;
+      syncDraftPayerDefault();
+      renderEditor();
+      showToast('Data nota dibersihkan.');
+    },
+  });
+}
+
+function saveNota() {
+  const tim = editorTim();
+  const periode = editorPeriode();
+  if (!draft || !tim || !periode) return;
+
+  const nota = {
+    ...draft.nota,
+    occurredAt: draft.nota.occurredAt || nowIso(),
+    createdAt: draft.nota.createdAt || nowIso(),
+    paidBy: draft.nota.paidBy.map((row) => ({ memberId: row.memberId, amount: rupiah(row.amount) })),
+  };
+
+  let result;
+  if (draft.notaId) result = updateNota(tim, periode.id, nota, nowIso());
+  else result = addNota(tim, periode.id, nota, nowIso());
+
+  if (!result.ok) {
+    const errors = result.errors || [{ message: result.message }];
+    return showModal({
+      title: 'Nota belum bisa disimpan',
+      body: `<ul class="text-sm space-y-1 list-disc pl-4">${errors.map((e) => `<li>${escapeHtml(e.message)}</li>`).join('')}</ul>`,
+    });
+  }
+
+  commitTim(result.tim);
+  draft = null;
+  showToast(oneOff ? 'Nota dihitung. Tidak ada yang disimpan.' : 'Nota tersimpan di periode ini.');
+
+  if (oneOff) {
+    activePeriodeId = periode.id;
+    navigate('settlement', { replace: true });
+  } else {
+    navigate('periode', { replace: true });
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * One-off mode
+ * ------------------------------------------------------------------ */
+
+function startOneTime() {
+  const now = nowIso();
+  oneOff = {
+    tim: {
+      id: uid('onetime'),
+      name: 'Sekali Pakai',
+      members: [],
+      holderId: null,
+      periods: [makePeriode({ id: uid('per'), label: 'Sekali Pakai', openedAt: now, participants: [] })],
+      handovers: [],
+      archivedAt: null,
+      createdAt: now,
+    },
+  };
+  activeTimId = null;
+  activePeriodeId = oneOff.tim.periods[0].id;
+  draft = null;
+  history = [];
+  navigate('upload');
+}
+
+/* ------------------------------------------------------------------ *
+ * OCR
+ * ------------------------------------------------------------------ */
+
 let cameraStream = null;
 
 async function openCamera() {
-  const overlay = document.getElementById('cameraOverlay');
-  const video = document.getElementById('cameraVideo');
-
-  // Use rear camera on mobile (facingMode: environment), any available camera on desktop
+  const overlay = $('cameraOverlay');
+  const video = $('cameraVideo');
   const constraints = {
-    video: {
-      facingMode: { ideal: 'environment' },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 }
-    },
-    audio: false
+    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    audio: false,
   };
 
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
-  } catch (err) {
-    console.warn('Camera access failed:', err);
-    showModal(
-      'Kamera Tidak Tersedia',
-      'Tidak dapat mengakses kamera. Pastikan Anda memberikan izin kamera di browser, atau gunakan opsi Unggah dari Galeri sebagai alternatif.'
-    );
-    return;
+  } catch (error) {
+    console.warn('Camera access failed:', error);
+    return showModal({
+      title: 'Kamera tidak tersedia',
+      body: '<p>Tidak bisa mengakses kamera. Beri izin kamera di browser, atau pakai unggah galeri / nota manual.</p>',
+    });
   }
 
   video.srcObject = cameraStream;
   overlay.classList.remove('hidden');
   overlay.classList.add('flex');
-  lucide.createIcons();
+  icons();
 }
 
 function capturePhoto() {
-  const video = document.getElementById('cameraVideo');
-  const canvas = document.getElementById('cameraCanvas');
-  const ctx = canvas.getContext('2d');
-
-  // Set canvas size to match video dimensions
+  const video = $('cameraVideo');
+  const canvas = $('cameraCanvas');
+  const context = canvas.getContext('2d');
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-  // Extract base64 JPEG from canvas
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
   const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  const base64Data = dataUrl.split(',')[1];
-
   closeCamera();
-  processImageWithAI(base64Data, 'image/jpeg');
+  processImageWithAI(dataUrl.split(',')[1], 'image/jpeg');
 }
 
 function closeCamera() {
   if (cameraStream) {
-    cameraStream.getTracks().forEach(track => track.stop());
+    cameraStream.getTracks().forEach((track) => track.stop());
     cameraStream = null;
   }
-  const video = document.getElementById('cameraVideo');
+  const video = $('cameraVideo');
   video.srcObject = null;
-  const overlay = document.getElementById('cameraOverlay');
+  const overlay = $('cameraOverlay');
   overlay.classList.add('hidden');
   overlay.classList.remove('flex');
 }
 
 function openGallery() {
-  document.getElementById('galleryInput').click();
+  $('galleryInput').click();
 }
 
 function handleFileSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = function (e) {
-    const base64Data = e.target.result.split(',')[1];
-    processImageWithAI(base64Data, file.type);
-  };
+  reader.onload = (e) => processImageWithAI(e.target.result.split(',')[1], file.type);
   reader.readAsDataURL(file);
-  // Reset input so re-selecting the same file still triggers onchange
   event.target.value = '';
 }
 
+function ensureDraftForParsed() {
+  if (draft) return;
+  const tim = currentTim();
+  const periode = currentPeriode() || (oneOff ? oneOff.tim.periods[0] : null);
+  if (!tim || !periode) return;
+  draft = { periodeId: periode.id, notaId: null, nota: blankNota(), payersAuto: true, source: 'ocr' };
+}
+
 async function processImageWithAI(base64Data, mimeType) {
-  document.getElementById('uploadSection').classList.add('hidden');
-  document.getElementById('loadingSection').classList.remove('hidden');
+  navigate('loading');
   const endpoint = '/.netlify/functions/analyze-receipt';
   const payload = { image: base64Data, mimeType };
   let response = null;
   const delays = [1000, 2000, 4000];
-  for (let i = 0; i <= delays.length; i++) {
+
+  for (let i = 0; i <= delays.length; i += 1) {
     try {
       response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
       if (response.ok) break;
-    } catch (e) { /* retry */ }
-    if (i < delays.length) await new Promise(res => setTimeout(res, delays[i]));
+    } catch (error) {
+      /* retry */
+    }
+    if (i < delays.length) await new Promise((resolve) => setTimeout(resolve, delays[i]));
   }
-  document.getElementById('loadingSection').classList.add('hidden');
+
   if (response && response.ok) {
     try {
       const result = await response.json();
       const content = result.choices?.[0]?.message?.content;
       if (content) {
-        const cleanJson = content.replace(/```json/g, '').replace(/```/g, '').trim();
-        populateParsedData(JSON.parse(cleanJson));
-        showToast('Foto nota berhasil dianalisis via Netlify API!');
+        const clean = content.replace(/```json/g, '').replace(/```/g, '').trim();
+        ensureDraftForParsed();
+        populateParsedData(JSON.parse(clean));
+        showToast('Foto nota dianalisis.');
         return;
       }
-    } catch (err) {
-      console.error('JSON Parse Error:', err);
+    } catch (error) {
+      console.error('JSON parse error:', error);
     }
   }
-  showModal('Pemberitahuan Analisis', 'Gagal memproses foto nota melalui server Netlify. Mengalihkan Anda ke mode manual dengan contoh data nota.', () => {
-    loadSampleReceipt();
+
+  showModal({
+    title: 'Analisis gagal',
+    body: '<p>Server Netlify tidak bisa memproses foto ini. Anda bisa mengisi nota secara manual.</p>',
+    confirmLabel: 'Isi manual',
+    onConfirm: () => {
+      ensureDraftForParsed();
+      if (!draft) return goHome();
+      draft.nota.items = [
+        { id: uid('item'), name: 'Item baru', qty: 1, price: 0, assignedTo: [] },
+      ];
+      navigate('editor');
+    },
   });
 }
 
+function populateParsedData(data) {
+  ensureDraftForParsed();
+  if (!draft) return;
+  draft.nota.merchant = data.merchant || 'Restoran / Kafe';
+  draft.nota.tax = Number(data.tax) || 0;
+  draft.nota.service = Number(data.service) || 0;
+  draft.nota.discount = Number(data.discount) || 0;
+  draft.nota.items = (data.items || []).map((item, index) => ({
+    id: uid(`item_${index}`),
+    name: item.name || `Menu ${index + 1}`,
+    qty: Math.max(1, Number(item.qty) || 1),
+    price: Math.max(0, Number(item.price) || 0),
+    assignedTo: [],
+  }));
+  syncDraftPayerDefault();
+  navigate('editor');
+}
+
 function loadSampleReceipt() {
-  const sampleData = {
+  const sample = {
     merchant: 'Kopi & Teman Resto',
     items: [
       { name: 'Es Kopi Susu Aren', qty: 2, price: 22000 },
       { name: 'Nasi Goreng Spesial', qty: 1, price: 38000 },
       { name: 'Roti Bakar Coklat', qty: 1, price: 25000 },
-      { name: 'French Fries', qty: 1, price: 20000 }
+      { name: 'French Fries', qty: 1, price: 20000 },
     ],
     tax: 12700,
     service: 6350,
-    discount: 10000
+    discount: 10000,
   };
-  document.getElementById('uploadSection').classList.add('hidden');
-  document.getElementById('loadingSection').classList.add('hidden');
-  populateParsedData(sampleData);
-
-  if (sessionMode !== 'teamBill' && appState.friends.length === 0) {
-    appState.friends = [
-      { id: 'f1', name: 'Andi', color: FRIEND_COLORS[0] },
-      { id: 'f2', name: 'Budi', color: FRIEND_COLORS[1] },
-      { id: 'f3', name: 'Citra', color: FRIEND_COLORS[2] }
-    ];
-    appState.items[0].assignedTo = ['f1', 'f2'];
-    appState.items[1].assignedTo = ['f2'];
-    appState.items[2].assignedTo = ['f3'];
-    appState.items[3].assignedTo = ['f1', 'f2', 'f3'];
+  ensureDraftForParsed();
+  if (!draft) return goHome();
+  // A one-off split has no roster yet: the sample needs people to be splittable.
+  if (oneOff && editorTim().members.length === 0) {
+    ['Andi', 'Budi', 'Citra'].forEach((name, index) => {
+      const tim = editorTim();
+      const result = addAnggota(tim, { id: uid('m'), name, colorIndex: index }, nowIso());
+      if (result.ok) {
+        let next = result.tim;
+        if (!next.holderId) next = { ...next, holderId: next.members[next.members.length - 1].id };
+        oneOff.tim = next;
+      }
+    });
   }
-  renderAll();
-  showToast('Contoh nota berhasil dimuat.');
+  populateParsedData(sample);
+  showToast('Contoh nota dimuat.');
 }
 
-function populateParsedData(data) {
-  appState.merchant = data.merchant || 'Restoran / Kafe';
-  appState.tax = Number(data.tax) || 0;
-  appState.service = Number(data.service) || 0;
-  appState.discount = Number(data.discount) || 0;
-  document.getElementById('merchantName').value = appState.merchant;
-  document.getElementById('taxInput').value = appState.tax || '';
-  document.getElementById('serviceInput').value = appState.service || '';
-  document.getElementById('discountInput').value = appState.discount || '';
-  appState.items = (data.items || []).map((item, index) => ({
-    id: 'item_' + Date.now() + '_' + index,
-    name: item.name || 'Menu ' + (index + 1),
-    qty: Math.max(1, Number(item.qty) || 1),
-    price: Math.max(0, Number(item.price) || 0),
-    assignedTo: []
-  }));
-  document.getElementById('editorSection').classList.remove('hidden');
-  updateTeamBillChrome();
-  renderAll();
+/* ------------------------------------------------------------------ *
+ * Modal, toast, clipboard
+ * ------------------------------------------------------------------ */
+
+/** The domain states the reason; money in it is formatted at this boundary. */
+function readableRefusal(result) {
+  const saldo = result.details?.saldo;
+  if (typeof saldo !== 'number') return result.message;
+  return result.message.replace(String(Math.abs(saldo)), formatRupiah(Math.abs(saldo)));
 }
 
-function updateCostState(key, val) {
-  appState[key] = Math.max(0, Number(val) || 0);
-  renderAll();
-}
+function showModal({ title, body, confirmLabel = null, onConfirm = null, danger = false }) {
+  $('modalTitle').textContent = title;
+  $('modalBody').innerHTML = body;
+  const actions = $('modalActions');
 
-function addNewItem() {
-  appState.items.push({
-    id: 'item_' + Date.now(),
-    name: 'Menu Baru',
-    qty: 1,
-    price: 10000,
-    assignedTo: []
-  });
-  renderAll();
-}
-
-function updateItem(id, field, val) {
-  const item = appState.items.find(i => i.id === id);
-  if (!item) return;
-  if (field === 'qty') item.qty = Math.max(1, Number(val) || 1);
-  else if (field === 'price') item.price = Math.max(0, Number(val) || 0);
-  else if (field === 'name') item.name = val;
-  renderAll();
-}
-
-function removeItem(id) {
-  appState.items = appState.items.filter(i => i.id !== id);
-  renderAll();
-}
-
-function toggleItemAssignment(itemId, friendId) {
-  const item = appState.items.find(i => i.id === itemId);
-  if (!item) return;
-  const idx = item.assignedTo.indexOf(friendId);
-  if (idx > -1) item.assignedTo.splice(idx, 1);
-  else item.assignedTo.push(friendId);
-  renderAll();
-}
-
-function addFriend() {
-  if (sessionMode === 'teamBill') return;
-  const input = document.getElementById('friendNameInput');
-  const name = input.value.trim();
-  if (!name) return;
-  const colorIndex = appState.friends.length % FRIEND_COLORS.length;
-  appState.friends.push({
-    id: 'f_' + Date.now(),
-    name,
-    color: FRIEND_COLORS[colorIndex]
-  });
-  input.value = '';
-  renderAll();
-}
-
-function removeFriend(friendId) {
-  if (sessionMode === 'teamBill') {
-    showToast('Anggota tim terkunci untuk periode ini.');
-    return;
-  }
-  appState.friends = appState.friends.filter(f => f.id !== friendId);
-  appState.items.forEach(item => {
-    item.assignedTo = item.assignedTo.filter(id => id !== friendId);
-  });
-  renderAll();
-}
-
-function autoAssignUnassignedItems() {
-  if (appState.friends.length === 0) {
-    showModal('Peringatan', 'Silakan tambahkan anggota kelompok terlebih dahulu di panel kanan.');
-    return;
-  }
-  let assignedCount = 0;
-  const allFriendIds = appState.friends.map(f => f.id);
-  appState.items.forEach(item => {
-    if (item.assignedTo.length === 0) {
-      item.assignedTo = [...allFriendIds];
-      assignedCount++;
-    }
-  });
-  if (assignedCount > 0) {
-    renderAll();
-    showToast(`${assignedCount} menu berhasil dibagi rata ke semua anggota.`);
+  if (onConfirm) {
+    actions.innerHTML = `
+      <button id="modalCancelBtn" class="px-3 py-1.5 bg-[#FAF6F0] text-[#6F4E37] border border-[#E6CCB2] font-semibold text-xs rounded-xl hover:bg-[#F3ECE0] transition">Batal</button>
+      <button id="modalConfirmBtn" class="px-4 py-1.5 ${danger ? 'bg-red-700 hover:bg-red-800' : 'bg-[#6F4E37] hover:bg-[#5C3D2E]'} text-[#FDFBF7] font-semibold text-xs rounded-xl transition">${escapeHtml(confirmLabel || 'Ya, lanjutkan')}</button>`;
+    $('modalCancelBtn').addEventListener('click', closeModal);
+    $('modalConfirmBtn').addEventListener('click', () => {
+      closeModal();
+      onConfirm();
+    });
   } else {
-    showToast('Semua menu sudah memiliki pemilih.');
-  }
-}
-
-function renderAll() {
-  document.getElementById('taxFormatted').innerText = formatRupiah(appState.tax);
-  document.getElementById('serviceFormatted').innerText = formatRupiah(appState.service);
-  document.getElementById('discountFormatted').innerText = formatRupiah(appState.discount);
-  renderItemList();
-  renderFriendsList();
-  calculateAndRenderSummary();
-  lucide.createIcons();
-}
-
-function renderItemList() {
-  const container = document.getElementById('itemList');
-  if (appState.items.length === 0) {
-    container.innerHTML = `<div class="text-center py-6 text-xs text-[#9C6F44]">Belum ada item pesanan. Klik "Tambah Menu" di atas.</div>`;
-    return;
-  }
-  container.innerHTML = appState.items.map(item => {
-    const totalItemPrice = item.qty * item.price;
-    const isUnassigned = item.assignedTo.length === 0;
-    return `
-      <div class="bg-[#FAF6F0] p-3.5 rounded-xl border ${isUnassigned ? 'border-amber-400/70 bg-amber-50/30' : 'border-[#E6CCB2]'} space-y-2.5 transition">
-        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div class="flex-grow">
-            <input type="text" value="${escapeHtml(item.name)}" onchange="updateItem('${item.id}', 'name', this.value)" class="w-full font-semibold text-sm text-[#3D312A] bg-transparent border-b border-transparent hover:border-[#E6CCB2] focus:border-[#6F4E37] focus:outline-none px-1 py-0.5 rounded">
-          </div>
-          <div class="flex items-center gap-2 justify-between sm:justify-end">
-            <div class="flex items-center bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg">
-              <button onclick="updateItem('${item.id}', 'qty', ${item.qty - 1})" class="px-2 py-0.5 text-xs text-[#6F4E37] hover:bg-[#F3ECE0] rounded-l-lg font-bold">-</button>
-              <span class="px-2 text-xs font-semibold text-[#3D312A]">${item.qty}</span>
-              <button onclick="updateItem('${item.id}', 'qty', ${item.qty + 1})" class="px-2 py-0.5 text-xs text-[#6F4E37] hover:bg-[#F3ECE0] rounded-r-lg font-bold">+</button>
-            </div>
-            <div class="relative w-28">
-              <span class="absolute left-2 top-1 text-xs text-[#9C6F44] font-medium">@</span>
-              <input type="number" value="${item.price}" onchange="updateItem('${item.id}', 'price', this.value)" class="w-full pl-6 pr-1.5 py-1 text-right text-xs font-semibold bg-[#FDFBF7] border border-[#E6CCB2] rounded-lg focus:outline-none focus:border-[#6F4E37]">
-            </div>
-            <span class="text-xs font-bold text-[#3D312A] w-24 text-right">${formatRupiah(totalItemPrice)}</span>
-            <button onclick="removeItem('${item.id}')" class="text-[#9C6F44] hover:text-red-600 p-1 transition"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-          </div>
-        </div>
-        <div class="pt-2 border-t border-[#E6CCB2]/60 flex flex-wrap items-center gap-1.5">
-          <span class="text-[11px] font-semibold text-[#9C6F44] mr-1">Pemilih:</span>
-          ${appState.friends.map(friend => {
-            const isAssigned = item.assignedTo.includes(friend.id);
-            return `
-              <button onclick="toggleItemAssignment('${item.id}', '${friend.id}')" class="text-[11px] font-semibold px-2.5 py-1 rounded-full border transition flex items-center gap-1 ${isAssigned ? `${friend.color.bg} ${friend.color.text} ${friend.color.border}` : 'bg-[#FDFBF7] text-[#6F4E37] border-[#E6CCB2] hover:bg-[#F3ECE0]'}">
-                <span>${escapeHtml(friend.name)}</span>
-                ${isAssigned ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''}
-              </button>`;
-          }).join('')}
-          ${appState.friends.length === 0 ? '<span class="text-[11px] text-[#9C6F44] italic">Tambah anggota dulu di panel kanan</span>' : ''}
-        </div>
-      </div>`;
-  }).join('');
-}
-
-function renderFriendsList() {
-  const container = document.getElementById('friendsList');
-  if (appState.friends.length === 0) {
-    container.innerHTML = `<span class="text-xs text-[#9C6F44] italic">Belum ada anggota yang ditambahkan.</span>`;
-    return;
-  }
-  container.innerHTML = appState.friends.map(friend => `
-    <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shadow-sm ${friend.color.bg} ${friend.color.text} ${friend.color.border}">
-      <span>${escapeHtml(friend.name)}</span>
-      ${sessionMode === 'teamBill' ? '' : `
-        <button onclick="removeFriend('${friend.id}')" class="hover:opacity-75 transition"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>`}
-    </div>`).join('');
-}
-
-function calculateAndRenderSummary() {
-  const { friendBreakdowns, grandTotal } = calculateBreakdowns(appState);
-  document.getElementById('grandTotalDisplay').innerText = formatRupiah(grandTotal);
-
-  const unassignedItems = appState.items.filter(i => i.assignedTo.length === 0);
-  const statusPill = document.getElementById('statusPill');
-  const statusText = document.getElementById('statusText');
-  if (unassignedItems.length > 0) {
-    statusPill.className = 'px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 bg-amber-100 text-amber-800 border border-amber-300';
-    statusText.innerText = `${unassignedItems.length} menu belum ada pemilih`;
-  } else if (appState.friends.length === 0) {
-    statusPill.className = 'px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 bg-[#F3ECE0] text-[#6F4E37] border border-[#E6CCB2]';
-    statusText.innerText = 'Tambahkan anggota kelompok';
-  } else {
-    statusPill.className = 'px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 bg-emerald-100 text-emerald-800 border border-emerald-300';
-    statusText.innerText = 'Sesuai Struk (Presisi 100%)';
+    actions.innerHTML =
+      '<button id="modalOkBtn" class="px-4 py-1.5 bg-[#6F4E37] text-[#FDFBF7] font-semibold text-xs rounded-xl hover:bg-[#5C3D2E] transition">Mengerti</button>';
+    $('modalOkBtn').addEventListener('click', closeModal);
   }
 
-  const container = document.getElementById('personSummaryList');
-  if (friendBreakdowns.length === 0) {
-    container.innerHTML = `<div class="text-center py-6 text-xs text-[#9C6F44]">Belum ada rincian anggota.</div>`;
-    return;
-  }
-  container.innerHTML = friendBreakdowns.map(data => `
-    <div class="bg-[#FAF6F0] p-4 rounded-xl border border-[#E6CCB2] space-y-3">
-      <div class="flex items-center justify-between pb-2 border-b border-[#E6CCB2]">
-        <div class="flex items-center gap-2">
-          <span class="px-2.5 py-1 rounded-lg text-xs font-bold ${data.friend.color.bg} ${data.friend.color.text}">${escapeHtml(data.friend.name)}</span>
-        </div>
-        <button onclick="copySingleSummary('${data.friend.id}')" class="text-xs font-semibold text-[#6F4E37] hover:text-[#3D312A] bg-[#FDFBF7] hover:bg-[#F3ECE0] px-2.5 py-1 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1">
-          <i data-lucide="copy" class="w-3 h-3"></i><span>Salin</span>
-        </button>
-      </div>
-      <div class="space-y-1 text-xs text-[#3D312A]">
-        ${data.items.length === 0 ? '<p class="text-[#9C6F44] italic">Belum memilih menu apapun</p>' : ''}
-        ${data.items.map(i => `
-          <div class="flex justify-between">
-            <span class="text-[#6F4E37]">${escapeHtml(i.name)} <span class="text-[10px] text-[#9C6F44]">(${i.portion} porsi)</span></span>
-            <span class="font-medium">${formatRupiah(i.price)}</span>
-          </div>`).join('')}
-        ${data.tax > 0 ? `<div class="flex justify-between text-[#9C6F44] pt-1"><span>Pajak (Proporsional)</span><span>+${formatRupiah(data.tax)}</span></div>` : ''}
-        ${data.service > 0 ? `<div class="flex justify-between text-[#9C6F44]"><span>Layanan (Proporsional)</span><span>+${formatRupiah(data.service)}</span></div>` : ''}
-        ${data.discount > 0 ? `<div class="flex justify-between text-emerald-700"><span>Diskon (Proporsional)</span><span>-${formatRupiah(data.discount)}</span></div>` : ''}
-      </div>
-      <div class="pt-2 border-t border-[#E6CCB2] flex justify-between items-center font-bold text-sm text-[#3D312A]">
-        <span>Total Tagihan:</span>
-        <span class="text-[#6F4E37] text-base">${formatRupiah(data.total)}</span>
-      </div>
-    </div>`).join('');
+  const modal = $('customModal');
+  modal.classList.remove('hidden');
+  setTimeout(() => {
+    modal.classList.remove('opacity-0');
+    $('modalContent').classList.remove('scale-95');
+  }, 10);
 }
 
-function generateWAFormatForPerson(friendId) {
-  const { friendBreakdowns } = calculateBreakdowns(appState);
-  const data = friendBreakdowns.find(b => b.friend.id === friendId);
-  if (!data) return '';
-  let text = `👤 *${data.friend.name}*\n`;
-  text += data.items.map(i => `  • ${i.name} (${i.portion} porsi) - ${formatRupiah(i.price)}`).join('\n') + '\n';
-  if (data.tax > 0) text += `  • Pajak (Proporsional) - +${formatRupiah(data.tax)}\n`;
-  if (data.service > 0) text += `  • Layanan (Proporsional) - +${formatRupiah(data.service)}\n`;
-  if (data.discount > 0) text += `  • Diskon (Proporsional) - -${formatRupiah(data.discount)}\n`;
-  text += `  *TOTAL TAGIHAN: ${formatRupiah(data.total)}*`;
-  return text;
+function closeModal() {
+  const modal = $('customModal');
+  modal.classList.add('opacity-0');
+  $('modalContent').classList.add('scale-95');
+  setTimeout(() => modal.classList.add('hidden'), 200);
 }
 
-function copySingleSummary(friendId) {
-  const friend = appState.friends.find(f => f.id === friendId);
-  const waText = `🧾 *RINCIAN BAGI RATA - ${appState.merchant.toUpperCase()}*\n\n` + generateWAFormatForPerson(friendId) + `\n\n_Dihitung otomatis via BagiRata.ai_`;
-  copyToClipboard(waText);
-  showToast(`Rincian tagihan ${friend ? friend.name : ''} disalin!`);
-}
-
-function copyAllSummary() {
-  if (appState.friends.length === 0) {
-    showModal('Peringatan', 'Belum ada data anggota untuk disalin.');
-    return;
-  }
-  const { grandTotal } = calculateBreakdowns(appState);
-  let text = `🧾 *RINCIAN BAGI RATA - ${appState.merchant.toUpperCase()}*\n`;
-  text += `-----------------------------------------\n`;
-  appState.friends.forEach(friend => {
-    text += generateWAFormatForPerson(friend.id) + `\n-----------------------------------------\n`;
-  });
-  text += `*TOTAL KESELURUHAN STRUK: ${formatRupiah(grandTotal)}*\n`;
-  text += `_Dihitung adil & presisi menggunakan BagiRata.ai_`;
-  copyToClipboard(text);
-  showToast('Seluruh tagihan berhasil disalin ke WhatsApp!');
+function showToast(message) {
+  const toast = $('toast');
+  $('toastMessage').textContent = message;
+  toast.classList.remove('translate-y-20', 'opacity-0');
+  setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
 }
 
 function copyToClipboard(text) {
@@ -1015,6 +1771,80 @@ function copyToClipboard(text) {
   textarea.style.opacity = '0';
   document.body.appendChild(textarea);
   textarea.select();
-  try { document.execCommand('copy'); } catch (err) { console.error('Fallback Copy Error:', err); }
+  try {
+    document.execCommand('copy');
+  } catch (error) {
+    console.error('Copy failed', error);
+  }
   document.body.removeChild(textarea);
 }
+
+/* ------------------------------------------------------------------ *
+ * Boot
+ * ------------------------------------------------------------------ */
+
+function boot() {
+  const savedTim = store.activeTimId ? findTim(store, store.activeTimId) : null;
+  const savedPeriode = savedTim ? findPeriode(savedTim, store.activePeriodeId) : null;
+  if (savedTim && savedPeriode) {
+    activeTimId = savedTim.id;
+    activePeriodeId = savedPeriode.id;
+    view = 'periode';
+  }
+  render();
+}
+
+// Inline handlers in index.html resolve against window; module scope is private.
+Object.assign(window, {
+  goHome,
+  goBack,
+  startOneTime,
+  startCreateTim,
+  addDraftMember,
+  removeDraftMember,
+  confirmCreateTim,
+  openTim,
+  openPeriode,
+  openSettlement,
+  addAnggotaToTim,
+  markAnggotaKeluar,
+  reactivateAnggota,
+  confirmHandover,
+  archiveCurrentTim,
+  unarchiveCurrentTim,
+  deleteCurrentTim,
+  openNewPeriode,
+  editPeriodeLabel,
+  toggleParticipant,
+  saveParticipants,
+  handleSetSaldoAwal,
+  addSetoran,
+  removeNotaFromPeriode,
+  confirmClosePeriode,
+  confirmReopenPeriode,
+  copySettlementWA,
+  startManualNota,
+  editNota,
+  draftChange,
+  addNewItem,
+  updateItem,
+  removeItem,
+  toggleItemAssignment,
+  bagiRataUnassigned,
+  addPayerRow,
+  updatePayer,
+  removePayerRow,
+  addEditorMember,
+  cancelEditor,
+  confirmResetDraft,
+  saveNota,
+  openCamera,
+  capturePhoto,
+  closeCamera,
+  openGallery,
+  handleFileSelect,
+  loadSampleReceipt,
+  fromDateInputValue,
+});
+
+boot();
