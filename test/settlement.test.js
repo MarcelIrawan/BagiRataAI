@@ -24,7 +24,7 @@ import {
   holderNetAt,
   outstandingAt,
   minimalTransfers,
-} from '../js/domain.js';
+} from '../public/js/domain.js';
 
 const NOW = '2026-10-20T10:00:00.000Z';
 const T1 = '2026-10-31T17:00:00.000Z';

@@ -7,7 +7,7 @@ import {
   kontribusi,
   settlementRows,
   notaGrandTotal,
-} from '../js/domain.js';
+} from '../public/js/domain.js';
 
 const CREATED = '2026-01-01T08:00:00.000Z';
 const CLOSED = '2026-02-10T18:00:00.000Z';
