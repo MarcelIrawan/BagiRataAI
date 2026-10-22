@@ -7,18 +7,19 @@ Aplikasi split bill berbasis AI (foto nota) dengan dua mode:
 
 ## Stack
 
-- Static SPA (`index.html` + ES modules di `js/`), tanpa bundler
+- Static SPA (`public/index.html` + ES modules di `public/js/`), tanpa bundler
 - Netlify Function: `netlify/functions/analyze-receipt.js` (OpenRouter multimodal OCR)
 - Persistensi: `localStorage` key `bagirata.v2` (key `bagirata.v1` dibaca sekali untuk migrasi, tidak dihapus)
+- Deploy: hanya folder `public/` yang dipublikasikan (`netlify.toml` → `[build] publish = "public"`)
 
 ## Modul
 
 | File | Isi |
 | --- | --- |
-| `js/domain.js` | Skema, migrasi v1→v2, dan **semua** aritmatika uang. Murni: tanpa DOM, `localStorage`, `Intl`, jam, atau jaringan |
-| `js/storage.js` | Hanya baca/tulis store mentah |
-| `js/format.js` | `formatRupiah`, `escapeHtml`, tanggal, warna |
-| `js/app.js` | Shell UI: routing, render, event handler. Tidak menghitung uang |
+| `public/js/domain.js` | Skema, migrasi v1→v2, dan **semua** aritmatika uang. Murni: tanpa DOM, `localStorage`, `Intl`, jam, atau jaringan |
+| `public/js/storage.js` | Hanya baca/tulis store mentah |
+| `public/js/format.js` | `formatRupiah`, `escapeHtml`, tanggal, warna |
+| `public/js/app.js` | Shell UI: routing, render, event handler. Tidak menghitung uang |
 | `netlify/functions/analyze-receipt.js` | OCR nota, hanya mengisi editor |
 
 ## Test
@@ -27,7 +28,7 @@ Aplikasi split bill berbasis AI (foto nota) dengan dua mode:
 npm test
 ```
 
-Node built-in test runner, tanpa dependency. Test menyentuh `js/domain.js` (Nota math, Settlement, siklus Periode/Anggota, migrasi) dan `netlify/functions/analyze-receipt.js` (kontrak HTTP handler).
+Node built-in test runner, tanpa dependency. Test menyentuh `public/js/domain.js` (Nota math, Settlement, siklus Periode/Anggota, migrasi) dan `netlify/functions/analyze-receipt.js` (kontrak HTTP handler).
 
 ## Model uang
 
@@ -45,4 +46,16 @@ kas        = Σ Setoran semua Periode − Σ paidBy milik Holder
 
 ## Local / deploy
 
-Deploy ke Netlify dan set env `OPENROUTER_API_KEY`. Untuk uji UI tanpa OCR, gunakan **Gunakan contoh nota**, atau **Nota Manual**.
+Jalankan UI secara lokal dari folder publish:
+
+```bash
+npx serve public      # atau server statis apa pun; ES module butuh http://, bukan file://
+```
+
+Deploy ke Netlify dan set env `OPENROUTER_API_KEY`. `netlify.toml` mempublikasikan `public/` saja — `test/`, `docs/`, `GLOSSARY.md`, `AGENTS.md`, dan `package.json` tidak pernah ikut ke deploy. Setelah mengubah `netlify.toml` atau isi `public/`, cek hasil deploy:
+
+```bash
+bash scripts/check-deploy-exposure.sh https://<url-deploy>
+```
+
+Untuk uji UI tanpa OCR, gunakan **Gunakan contoh nota**, atau **Nota Manual**.

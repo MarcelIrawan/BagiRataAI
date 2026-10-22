@@ -9,7 +9,7 @@ import {
   notaGrandTotal,
   konsumsi,
   setParticipants,
-} from '../js/domain.js';
+} from '../public/js/domain.js';
 
 const NOW = '2026-10-20T10:00:00.000Z';
 

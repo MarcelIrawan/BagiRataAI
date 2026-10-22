@@ -1,7 +1,8 @@
 # BagiRata AI
 
-Split-bill app: static SPA (`index.html`, `js/`) plus a Netlify function
-(`netlify/functions/analyze-receipt.js`) for multimodal receipt OCR.
+Split-bill app: static SPA (`public/index.html`, `public/js/`) plus a Netlify function
+(`netlify/functions/analyze-receipt.js`) for multimodal receipt OCR. `netlify.toml`
+publishes `public/` only, so the repo's tests and docs stay out of the deploy.
 
 ## Agent skills
 
