@@ -1,8 +1,13 @@
 # BagiRata AI
 
-Split-bill app: static SPA (`public/index.html`, `public/js/`) plus a Netlify function
-(`netlify/functions/analyze-receipt.js`) for multimodal receipt OCR. `netlify.toml`
-publishes `public/` only, so the repo's tests and docs stay out of the deploy.
+Split-bill app: static SPA (`public/index.html`, `public/js/`) plus a Cloudflare
+Pages Function (`functions/api/analyze-receipt.js`, route `/api/analyze-receipt`)
+for multimodal receipt OCR. The Pages build publishes `public/` only (build
+command `exit 0`, build output directory `public`), so the repo's tests and docs
+stay out of the deploy; `public/_routes.json` invokes the function on `/api/*`
+only, keeping static requests off the Functions quota. `public/404.html` must
+exist: without a top-level 404 Pages serves the SPA with 200 for every missing
+path, which breaks the deploy-exposure check.
 
 ## Agent skills
 

@@ -1612,7 +1612,7 @@ function ensureDraftForParsed() {
 
 async function processImageWithAI(base64Data, mimeType) {
   navigate('loading');
-  const endpoint = '/.netlify/functions/analyze-receipt';
+  const endpoint = '/api/analyze-receipt';
   const payload = { image: base64Data, mimeType };
   let response = null;
   const delays = [1000, 2000, 4000];
@@ -1649,7 +1649,7 @@ async function processImageWithAI(base64Data, mimeType) {
 
   showModal({
     title: 'Analisis gagal',
-    body: '<p>Server Netlify tidak bisa memproses foto ini. Anda bisa mengisi nota secara manual.</p>',
+    body: '<p>Server OCR tidak bisa memproses foto ini. Anda bisa mengisi nota secara manual.</p>',
     confirmLabel: 'Isi manual',
     onConfirm: () => {
       ensureDraftForParsed();
