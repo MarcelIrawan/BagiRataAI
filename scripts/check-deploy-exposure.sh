@@ -41,7 +41,9 @@ PUBLIC=(
 OUT=$(mktemp)
 # -L: Cloudflare Pages 308-redirects /index.html to / (extension-less
 # counterpart), so "reachable after redirect" still counts as serving.
-status() { curl -sL -o "$OUT" -w "%{http_code}" "$BASE$1"; }
+# Cache-bust: Cloudflare edge-caches per URL (query string included), so a 200
+# cached by an earlier bad deploy would mask a now-fixed 404 — and vice versa.
+status() { curl -sL -o "$OUT" -w "%{http_code}" "$BASE$1?cb=$RANDOM$RANDOM"; }
 
 leaks=0
 breaks=0
@@ -67,7 +69,7 @@ for p in "${PUBLIC[@]}"; do
 done
 
 echo "=== function endpoint (expect 200 on OPTIONS) ==="
-fcode=$(curl -s -o "$OUT" -w "%{http_code}" -X OPTIONS "$BASE/api/analyze-receipt")
+fcode=$(curl -s -o "$OUT" -w "%{http_code}" -X OPTIONS "$BASE/api/analyze-receipt?cb=$RANDOM$RANDOM")
 if [ "$fcode" = "200" ]; then
   echo "  ok    $fcode  OPTIONS /api/analyze-receipt"
 else
