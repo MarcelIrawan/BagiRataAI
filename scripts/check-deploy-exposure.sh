@@ -7,7 +7,7 @@
 # GREEN = internals 404, and the app's own surface still serves.
 #
 # Run it against the production URL and against a deploy preview after changing
-# `netlify.toml` or the layout of `public/`.
+# the Cloudflare Pages build settings or the layout of `public/`.
 set -u
 
 BASE="${1:?usage: check-deploy-exposure.sh <base-url>}"
@@ -18,16 +18,15 @@ PRIVATE=(
   "/README.md"
   "/AGENTS.md"
   "/GLOSSARY.md"
-  "/netlify.toml"
-  "/test/nota.test.js"
+    "/test/nota.test.js"
   "/test/settlement.test.js"
   "/test/lifecycle.test.js"
   "/test/migration.test.js"
   "/test/function.test.js"
   "/docs/agents/issue-tracker.md"
   "/docs/adr/0001-holder-is-the-sole-settlement-counterparty.md"
-  "/netlify/functions/analyze-receipt.js"
-)
+  "/functions/api/analyze-receipt.js"
+  )
 
 # The app's real surface, which must keep working.
 PUBLIC=(
@@ -40,7 +39,9 @@ PUBLIC=(
 )
 
 OUT=$(mktemp)
-status() { curl -s -o "$OUT" -w "%{http_code}" "$BASE$1"; }
+# -L: Cloudflare Pages 308-redirects /index.html to / (extension-less
+# counterpart), so "reachable after redirect" still counts as serving.
+status() { curl -sL -o "$OUT" -w "%{http_code}" "$BASE$1"; }
 
 leaks=0
 breaks=0
@@ -66,11 +67,11 @@ for p in "${PUBLIC[@]}"; do
 done
 
 echo "=== function endpoint (expect 200 on OPTIONS) ==="
-fcode=$(curl -s -o "$OUT" -w "%{http_code}" -X OPTIONS "$BASE/.netlify/functions/analyze-receipt")
+fcode=$(curl -s -o "$OUT" -w "%{http_code}" -X OPTIONS "$BASE/api/analyze-receipt")
 if [ "$fcode" = "200" ]; then
-  echo "  ok    $fcode  OPTIONS /.netlify/functions/analyze-receipt"
+  echo "  ok    $fcode  OPTIONS /api/analyze-receipt"
 else
-  echo "  BROKE $fcode  OPTIONS /.netlify/functions/analyze-receipt"; breaks=$((breaks + 1))
+  echo "  BROKE $fcode  OPTIONS /api/analyze-receipt"; breaks=$((breaks + 1))
 fi
 
 rm -f "$OUT"

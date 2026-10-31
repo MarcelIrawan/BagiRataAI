@@ -1,0 +1,7 @@
+# wrangler local state (created by `wrangler pages dev` / `wrangler deploy`)
+.wrangler/
+
+# Local Cloudflare secrets — never commit an API key
+.dev.vars
+
+node_modules/

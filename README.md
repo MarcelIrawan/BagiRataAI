@@ -8,9 +8,9 @@ Aplikasi split bill berbasis AI (foto nota) dengan dua mode:
 ## Stack
 
 - Static SPA (`public/index.html` + ES modules di `public/js/`), tanpa bundler
-- Netlify Function: `netlify/functions/analyze-receipt.js` (OpenRouter multimodal OCR)
+- Cloudflare Pages Function: `functions/api/analyze-receipt.js` → route `/api/analyze-receipt` (OpenRouter multimodal OCR)
 - Persistensi: `localStorage` key `bagirata.v2` (key `bagirata.v1` dibaca sekali untuk migrasi, tidak dihapus)
-- Deploy: hanya folder `public/` yang dipublikasikan (`netlify.toml` → `[build] publish = "public"`)
+- Deploy: hanya folder `public/` yang dipublikasikan (Cloudflare Pages: build command `exit 0`, build output directory `public`); folder `functions/` ada di root repo dan tidak pernah dipublikasikan sebagai file statis
 
 ## Modul
 
@@ -20,7 +20,7 @@ Aplikasi split bill berbasis AI (foto nota) dengan dua mode:
 | `public/js/storage.js` | Hanya baca/tulis store mentah |
 | `public/js/format.js` | `formatRupiah`, `escapeHtml`, tanggal, warna |
 | `public/js/app.js` | Shell UI: routing, render, event handler. Tidak menghitung uang |
-| `netlify/functions/analyze-receipt.js` | OCR nota, hanya mengisi editor |
+| `functions/api/analyze-receipt.js` | OCR nota (Pages Function, route `/api/analyze-receipt`), hanya mengisi editor |
 
 ## Test
 
@@ -28,7 +28,7 @@ Aplikasi split bill berbasis AI (foto nota) dengan dua mode:
 npm test
 ```
 
-Node built-in test runner, tanpa dependency. Test menyentuh `public/js/domain.js` (Nota math, Settlement, siklus Periode/Anggota, migrasi) dan `netlify/functions/analyze-receipt.js` (kontrak HTTP handler).
+Node built-in test runner, tanpa dependency. Test menyentuh `public/js/domain.js` (Nota math, Settlement, siklus Periode/Anggota, migrasi) dan `functions/api/analyze-receipt.js` (kontrak HTTP handler Pages).
 
 ## Model uang
 
@@ -52,7 +52,7 @@ Jalankan UI secara lokal dari folder publish:
 npx serve public      # atau server statis apa pun; ES module butuh http://, bukan file://
 ```
 
-Deploy ke Netlify dan set env `OPENROUTER_API_KEY`. `netlify.toml` mempublikasikan `public/` saja — `test/`, `docs/`, `GLOSSARY.md`, `AGENTS.md`, dan `package.json` tidak pernah ikut ke deploy. Setelah mengubah `netlify.toml` atau isi `public/`, cek hasil deploy:
+Deploy ke Cloudflare Pages (Workers & Pages → Create application → Pages → import repo `MarcelIrawan/BagiRataAI`): production branch `main`, build command `exit 0`, build output directory `public`. Set env `OPENROUTER_API_KEY` di Settings → Environment variables (Production **dan** Preview) — fungsi membacanya dari `context.env`, bukan `process.env`. `public/_routes.json` membatasi invokasi function hanya ke `/api/*`, supaya request statis tetap unlimited. `public/404.html` WAJIB ada: tanpa file 404 top-level, Cloudflare Pages menganggap proyek SPA dan mengembalikan `index.html` dengan status 200 untuk path apa pun yang tidak ada — script cek di bawah akan salah baca sebagai leak. Build output `public/` saja — `test/`, `docs/`, `GLOSSARY.md`, `AGENTS.md`, dan `package.json` tidak pernah ikut ke deploy. Setelah mengubah pengaturan build atau isi `public/`, cek hasil deploy:
 
 ```bash
 bash scripts/check-deploy-exposure.sh https://<url-deploy>
