@@ -45,7 +45,7 @@ export const onRequest = async function(context) {
     }
 
     const endpoint = "https://openrouter.ai/api/v1/chat/completions";
-    const model = "xiaomi/mimo-v2.5";
+    const model = "z-ai/glm-5.3-flash";
 
     const prompt = `Analisis foto struk/nota ini dan kembalikan JSON persis seperti format berikut tanpa markdown tambahan:
 {
