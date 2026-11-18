@@ -449,23 +449,23 @@ function renderTim() {
 
   // settlement rows (live)
   const rows = settlementRows(tim);
-  $('periodeBalances').innerHTML = rows
-    .map((row) => {
-      const color = colorOf((findAnggota(tim, row.memberId) || {}).colorIndex);
-      const saldoClass = row.saldo > 0 ? 'text-amber-800' : row.saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
-      return `
-        <div class="flex justify-between items-center gap-2 py-1.5 border-b border-[#E6CCB2]/40">
-          <div class="min-w-0">
-            <span class="px-2 py-0.5 rounded text-[11px] font-bold ${color.bg} ${color.text}">${escapeHtml(row.name)}</span>
-            ${row.isHolder ? '<span class="text-[10px] uppercase text-[#6F4E37] ml-1">Holder</span>' : ''}
-            <span class="block text-[10px] text-[#9C6F44]">awal ${formatRupiah(row.saldoAwal)} · konsumsi ${formatRupiah(row.konsumsi)} · kontribusi ${formatRupiah(row.kontribusi)}</span>
-          </div>
-          <span class="text-xs font-semibold ${saldoClass} shrink-0">${formatRupiah(row.saldo)}</span>
-        </div>`;
-    })
-    .join('');
+  $('timBalances').innerHTML = rows
+      .map((row) => {
+        const color = colorOf((findAnggota(tim, row.memberId) || {}).colorIndex);
+        const saldoClass = row.saldo > 0 ? 'text-amber-800' : row.saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
+        return `
+          <div class="flex justify-between items-center gap-2 py-1.5 border-b border-[#E6CCB2]/40">
+            <div class="min-w-0">
+              <span class="px-2 py-0.5 rounded text-[11px] font-bold ${color.bg} ${color.text}">${escapeHtml(row.name)}</span>
+              ${row.isHolder ? '<span class="text-[10px] uppercase text-[#6F4E37] ml-1">Holder</span>' : ''}
+              <span class="block text-[10px] text-[#9C6F44]">awal ${formatRupiah(row.saldoAwal)} · konsumsi ${formatRupiah(row.konsumsi)} · kontribusi ${formatRupiah(row.kontribusi)}</span>
+            </div>
+            <span class="text-xs font-semibold ${saldoClass} shrink-0">${formatRupiah(row.saldo)}</span>
+          </div>`;
+      })
+      .join('');
 
-  $('periodeKasNote').textContent = `Kas Holder: ${formatRupiah(kas(tim))}`;
+    $('timKasNote').textContent = `Kas Holder: ${formatRupiah(kas(tim))}`;
 }
 
 function addAnggotaToTim() {
