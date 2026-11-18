@@ -2,13 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createTim,
-  findPeriode,
   addNota,
   validateNota,
   notaBreakdown,
   notaGrandTotal,
   konsumsi,
-  setParticipants,
+  setAnggotaStatus,
 } from '../public/js/domain.js';
 
 const NOW = '2026-10-20T10:00:00.000Z';
@@ -19,22 +18,19 @@ function makeTim() {
     name: 'Kantor',
     holderId: 'h',
     now: NOW,
-    periodeId: 'p1',
-    label: 'Oktober',
     members: [
       { id: 'h', name: 'Hana' },
       { id: 'a', name: 'Andi' },
       { id: 'b', name: 'Budi' },
       { id: 'c', name: 'Citra' },
     ],
+    openingBalances: {},
   });
 }
 
-const periodeOf = (tim) => findPeriode(tim, 'p1');
-
 function rowOf(breakdown, memberId) {
   const row = breakdown.rows.find((r) => r.memberId === memberId);
-  assert.ok(row, `expected a breakdown row for ${memberId}`);
+  assert.ok(row, 'expected a breakdown row for ' + memberId);
   return row;
 }
 
@@ -156,14 +152,14 @@ test('grand total is items plus tax plus service minus discount', () => {
   assert.equal(notaGrandTotal({ items: [] }), 0);
 });
 
-test('Konsumsi of one Anggota sums their share of every Nota in the Periode', () => {
+test('Konsumsi of one Anggota sums their share of every Nota in the Tim', () => {
   let tim = makeTim();
-  tim = addNota(tim, 'p1', nota({ id: 'n1', items: [{ name: 'A', qty: 1, price: 30000, assignedTo: ['a', 'b'] }], paidBy: [{ memberId: 'h', amount: 30000 }] }), NOW).tim;
-  tim = addNota(tim, 'p1', nota({ id: 'n2', items: [{ name: 'B', qty: 1, price: 8000, assignedTo: ['a'] }], paidBy: [{ memberId: 'h', amount: 8000 }] }), NOW).tim;
+  tim = addNota(tim, nota({ id: 'n1', items: [{ name: 'A', qty: 1, price: 30000, assignedTo: ['a', 'b'] }], paidBy: [{ memberId: 'h', amount: 30000 }] }), NOW).tim;
+  tim = addNota(tim, nota({ id: 'n2', items: [{ name: 'B', qty: 1, price: 8000, assignedTo: ['a'] }], paidBy: [{ memberId: 'h', amount: 8000 }] }), NOW).tim;
 
-  assert.equal(konsumsi(tim, periodeOf(tim), 'a'), 15000 + 8000);
-  assert.equal(konsumsi(tim, periodeOf(tim), 'b'), 15000);
-  assert.equal(konsumsi(tim, periodeOf(tim), 'h'), 0);
+  assert.equal(konsumsi(tim, 'a'), 15000 + 8000);
+  assert.equal(konsumsi(tim, 'b'), 15000);
+  assert.equal(konsumsi(tim, 'h'), 0);
 });
 
 /* ---------------------------------------------------------------- *
@@ -172,7 +168,7 @@ test('Konsumsi of one Anggota sums their share of every Nota in the Periode', ()
 
 test('a Nota with no items is refused and says an item is required', () => {
   const tim = makeTim();
-  const result = validateNota(tim, periodeOf(tim), nota({ items: [] }));
+  const result = validateNota(tim, nota({ items: [] }));
 
   assert.equal(result.ok, false);
   assert.ok(codes(result).includes('NOTA_NO_ITEMS'));
@@ -183,7 +179,6 @@ test('a Nota with unpicked items is refused and the message states how many', ()
   const tim = makeTim();
   const result = validateNota(
     tim,
-    periodeOf(tim),
     nota({
       items: [
         { name: 'A', qty: 1, price: 10000, assignedTo: [] },
@@ -201,12 +196,11 @@ test('a Nota with unpicked items is refused and the message states how many', ()
   assert.equal(error.count, 2);
 });
 
-test('an item assigned to someone outside the Periode participant set is refused', () => {
+test('an item assigned to someone outside the active members is refused', () => {
   let tim = makeTim();
-  tim = setParticipants(tim, 'p1', ['h', 'a', 'c']).tim;
+  tim = setAnggotaStatus(tim, 'b', 'keluar', '2026-10-21T00:00:00.000Z').tim;
   const result = validateNota(
     tim,
-    periodeOf(tim),
     nota({ items: [{ name: 'A', qty: 1, price: 10000, assignedTo: ['b'] }] })
   );
 
@@ -214,7 +208,7 @@ test('an item assigned to someone outside the Periode participant set is refused
   assert.ok(codes(result).includes('NOTA_PEMILIH_NOT_PARTICIPANT'));
   assert.match(
     result.errors.find((e) => e.code === 'NOTA_PEMILIH_NOT_PARTICIPANT').message,
-    /bukan peserta/i
+    /bukan anggota aktif/i
   );
 });
 
@@ -222,7 +216,6 @@ test('an under-funded payer list is refused and reports the remainder', () => {
   const tim = makeTim();
   const result = validateNota(
     tim,
-    periodeOf(tim),
     nota({ paidBy: [{ memberId: 'h', amount: 6000 }] })
   );
 
@@ -237,7 +230,6 @@ test('an over-funded payer list is refused and reports the excess', () => {
   const tim = makeTim();
   const result = validateNota(
     tim,
-    periodeOf(tim),
     nota({ paidBy: [{ memberId: 'h', amount: 12000 }] })
   );
 
@@ -252,7 +244,6 @@ test('a negative grand total is refused', () => {
   const tim = makeTim();
   const result = validateNota(
     tim,
-    periodeOf(tim),
     nota({ items: [{ name: 'A', qty: 1, price: 1000, assignedTo: ['a'] }], discount: 5000 })
   );
 
@@ -264,13 +255,12 @@ test('a negative grand total is refused', () => {
   );
 });
 
-test('a payer who is not a participant of the Periode is refused', () => {
+test('a payer who is not an active member is refused', () => {
   let tim = makeTim();
-  tim = setParticipants(tim, 'p1', ['h', 'a', 'b']).tim;
+  tim = setAnggotaStatus(tim, 'c', 'keluar', '2026-10-21T00:00:00.000Z').tim;
 
   const result = validateNota(
     tim,
-    periodeOf(tim),
     nota({ paidBy: [{ memberId: 'c', amount: 10000 }] })
   );
 
@@ -278,16 +268,16 @@ test('a payer who is not a participant of the Periode is refused', () => {
   assert.ok(codes(result).includes('NOTA_PEMBAYAR_NOT_PARTICIPANT'));
   assert.match(
     result.errors.find((e) => e.code === 'NOTA_PEMBAYAR_NOT_PARTICIPANT').message,
-    /pembayar yang bukan peserta/i
+    /bukan anggota aktif/i
   );
 });
 
 test('a valid Nota is accepted and records when it happened and when it was written', () => {
   const tim = makeTim();
-  const result = addNota(tim, 'p1', nota({ occurredAt: '2026-10-19T12:00:00.000Z' }), NOW);
+  const result = addNota(tim, nota({ occurredAt: '2026-10-19T12:00:00.000Z' }), NOW);
 
   assert.equal(result.ok, true);
-  const bills = findPeriode(result.tim, 'p1').bills;
+  const bills = result.tim.notes;
   assert.equal(bills.length, 1);
   assert.equal(bills[0].occurredAt, '2026-10-19T12:00:00.000Z');
   assert.equal(bills[0].createdAt, NOW);

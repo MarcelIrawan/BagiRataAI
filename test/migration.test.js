@@ -1,18 +1,107 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  migrateV1,
+  migrateV2,
   SCHEMA_VERSION,
-  findPeriode,
   kontribusi,
   settlementRows,
   notaGrandTotal,
+  saldoNow,
 } from '../public/js/domain.js';
 
 const CREATED = '2026-01-01T08:00:00.000Z';
 const CLOSED = '2026-02-10T18:00:00.000Z';
 
 function legacyStore() {
+  return {
+    version: 2,
+    activeTimId: 'team1',
+    tims: [
+      {
+        id: 'team1',
+        name: 'Kantor',
+        holderId: 'h',
+        status: 'open',
+        createdAt: CREATED,
+        closedAt: null,
+        members: [
+          { id: 'h', name: 'Hana', colorIndex: 0 },
+          { id: 'a', name: 'Andi', colorIndex: 1 },
+        ],
+        periods: [
+          {
+            id: 'p1',
+            label: 'Oktober',
+            status: 'open',
+            openedAt: CREATED,
+            closedAt: null,
+            participants: ['h', 'a'],
+            bills: [
+              {
+                id: 'b1',
+                merchant: 'Warung',
+                createdAt: CREATED,
+                items: [{ id: 'i1', name: 'Nasi', qty: 1, price: 30000, assignedTo: ['a'] }],
+                tax: 3000,
+                service: 0,
+                discount: 0,
+                paidBy: [],
+              },
+            ],
+            deposits: [{ id: 'd1', memberId: 'a', amount: 10000, createdAt: CREATED }],
+            saldoAwalByMember: {},
+            snapshot: null,
+            reDerivedAt: null,
+          },
+        ],
+        handovers: [],
+        archivedAt: null,
+      },
+      {
+        id: 'team2',
+        name: 'Liburan',
+        holderId: 'y',
+        status: 'closed',
+        createdAt: CREATED,
+        closedAt: CLOSED,
+        members: [
+          { id: 'x', name: 'Xena', colorIndex: 0 },
+          { id: 'y', name: 'Yudi', colorIndex: 1 },
+        ],
+        periods: [
+          {
+            id: 'p1',
+            label: 'Januari',
+            status: 'closed',
+            openedAt: CREATED,
+            closedAt: CLOSED,
+            participants: ['x', 'y'],
+            bills: [
+              {
+                id: 'b2',
+                merchant: 'Hotel',
+                createdAt: CREATED,
+                items: [{ id: 'i2', name: 'Kamar', qty: 1, price: 200000, assignedTo: ['x', 'y'] }],
+                tax: 0,
+                service: 0,
+                discount: 0,
+                paidBy: [],
+              },
+            ],
+            deposits: [],
+            saldoAwalByMember: {},
+            snapshot: { at: CLOSED, rows: [], kas: 0 },
+            reDerivedAt: null,
+          },
+        ],
+        handovers: [],
+        archivedAt: null,
+      },
+    ],
+  };
+}
+
+function v1Store() {
   return {
     version: 1,
     activeTeamId: 'team1',
@@ -41,129 +130,99 @@ function legacyStore() {
         ],
         deposits: [{ id: 'd1', memberId: 'a', amount: 10000, createdAt: CREATED }],
       },
-      {
-        id: 'team2',
-        name: 'Liburan',
-        holderId: 'y',
-        status: 'closed',
-        createdAt: CREATED,
-        closedAt: CLOSED,
-        members: [
-          { id: 'x', name: 'Xena' },
-          { id: 'y', name: 'Yudi' },
-        ],
-        bills: [
-          {
-            id: 'b2',
-            merchant: 'Hotel',
-            createdAt: CREATED,
-            items: [{ id: 'i2', name: 'Kamar', qty: 1, price: 200000, assignedTo: ['x', 'y'] }],
-            tax: 0,
-            service: 0,
-            discount: 0,
-          },
-        ],
-        deposits: [],
-      },
     ],
   };
 }
 
-test('migrating a v1 store produces v2 with one Tim and exactly one Periode per old team', () => {
-  const v2 = migrateV1(legacyStore());
+test('migrating a v2 store (with periods) produces v3 with flattened Tim', () => {
+  const v3 = migrateV2(legacyStore());
 
-  assert.equal(v2.version, SCHEMA_VERSION);
-  assert.equal(v2.tims.length, 2);
-  for (const tim of v2.tims) {
-    assert.equal(tim.periods.length, 1, `${tim.name} must hold exactly one Periode`);
-    assert.ok(['open', 'closed'].includes(tim.periods[0].status));
+  assert.equal(v3.version, SCHEMA_VERSION);
+  assert.equal(v3.tims.length, 2);
+  for (const tim of v3.tims) {
+    assert.ok(!tim.periods, 'Tim should not have periods anymore');
+    assert.ok(Array.isArray(tim.notes));
+    assert.ok(Array.isArray(tim.setorans));
+    assert.ok(tim.openingBalances);
   }
 
-  const kantor = v2.tims.find((t) => t.id === 'team1');
+  const kantor = v3.tims.find((t) => t.id === 'team1');
   assert.equal(kantor.name, 'Kantor');
   assert.equal(kantor.holderId, 'h');
   assert.equal(kantor.members.length, 2);
-  assert.deepEqual(kantor.handovers, []);
-  assert.equal(kantor.periods[0].status, 'open');
-  assert.equal(kantor.periods[0].bills.length, 1);
-  assert.equal(kantor.periods[0].deposits.length, 1);
-  assert.equal(kantor.periods[0].deposits[0].amount, 10000);
+  assert.equal(kantor.notes.length, 1);
+  assert.equal(kantor.setorans.length, 1);
+  assert.equal(kantor.setorans[0].amount, 10000);
 });
 
-test('the migrated participants include the Holder', () => {
-  const v2 = migrateV1(legacyStore());
+test('migrating a v1 store produces v3 with flattened Tim', () => {
+  const v3 = migrateV2(v1Store());
 
-  for (const tim of v2.tims) {
-    assert.ok(
-      tim.periods[0].participants.includes(tim.holderId),
-      `${tim.name}: the Holder must be a participant`
-    );
-  }
-  // Holder is the second member of the closed team; inclusion must not depend on order.
-  const liburan = v2.tims.find((t) => t.id === 'team2');
-  assert.deepEqual(liburan.periods[0].participants, ['x', 'y']);
+  assert.equal(v3.version, SCHEMA_VERSION);
+  assert.equal(v3.tims.length, 1);
+  const kantor = v3.tims[0];
+  assert.equal(kantor.name, 'Kantor');
+  assert.equal(kantor.holderId, 'h');
+  assert.equal(kantor.members.length, 2);
+  assert.equal(kantor.notes.length, 1);
+  assert.equal(kantor.setorans.length, 1);
+  assert.equal(kantor.setorans[0].amount, 10000);
 });
 
-test('a v1 Nota with no paidBy becomes Holder-paid for its grand total', () => {
-  const v2 = migrateV1(legacyStore());
-  const kantor = v2.tims.find((t) => t.id === 'team1');
-  const periode = kantor.periods[0];
-  const nota = periode.bills[0];
+test('a v1/v2 Nota with no paidBy becomes Holder-paid for its grand total', () => {
+  const v3 = migrateV2(legacyStore());
+  const kantor = v3.tims.find((t) => t.id === 'team1');
+  const nota = kantor.notes[0];
 
   assert.equal(notaGrandTotal(nota), 33000);
   assert.deepEqual(nota.paidBy, [{ memberId: 'h', amount: 33000 }]);
-  assert.equal(kontribusi(kantor, periode, 'h'), 33000);
-  assert.equal(kontribusi(kantor, periode, 'a'), 10000, 'only the migrated Setoran');
+  assert.equal(kontribusi(kantor, 'h'), 33000);
+  assert.equal(kontribusi(kantor, 'a'), 10000, 'only the migrated Setoran');
 });
 
-test('a closed v1 team becomes a closed Periode with its close time and a snapshot', () => {
-  const v2 = migrateV1(legacyStore());
-  const liburan = v2.tims.find((t) => t.id === 'team2');
-  const periode = liburan.periods[0];
+test('migration is idempotent: running it twice, or on a v3 store, changes nothing', () => {
+  const once = migrateV2(legacyStore());
+  const twice = migrateV2(once);
 
-  assert.equal(periode.status, 'closed');
-  assert.equal(periode.closedAt, CLOSED);
-  assert.equal(periode.snapshot.at, CLOSED);
-  assert.ok(Array.isArray(periode.snapshot.rows));
-  assert.equal(periode.snapshot.rows.length, 2);
-
-  const xena = periode.snapshot.rows.find((r) => r.memberId === 'x');
-  assert.equal(xena.saldoAwal, 0);
-  assert.equal(xena.konsumsi, 100000);
-  assert.equal(xena.saldo, 100000);
-
-  const rendered = settlementRows(liburan, findPeriode(liburan, periode.id));
-  assert.equal(rendered.length, 2);
-  for (const row of rendered) assert.equal(row.source, 'snapshot');
+  assert.deepEqual(twice, once, 'migrating a v3 store returns it unchanged');
+  assert.deepEqual(migrateV2(once), migrateV2(twice));
 });
 
-test('migration is idempotent: running it twice, or on a v2 store, changes nothing', () => {
-  const once = migrateV1(legacyStore());
-  const twice = migrateV1(once);
+test('activeTimId is carried into activeTimId', () => {
+  const v3 = migrateV2(legacyStore());
 
-  assert.deepEqual(twice, once, 'migrating a v2 store returns it unchanged');
-  assert.deepEqual(migrateV1(once), migrateV1(twice));
+  assert.equal(v3.activeTimId, 'team1');
 });
 
-test('activeTeamId is carried into activeTimId and its Periode becomes active', () => {
-  const v2 = migrateV1(legacyStore());
-
-  assert.equal(v2.activeTimId, 'team1');
-  assert.equal(v2.activePeriodeId, v2.tims.find((t) => t.id === 'team1').periods[0].id);
-});
-
-test('an unknown activeTeamId migrates to no active Tim', () => {
+test('an unknown activeTimId migrates to no active Tim', () => {
   const store = legacyStore();
-  store.activeTeamId = 'gone';
-  const v2 = migrateV1(store);
+  store.activeTimId = 'gone';
+  const v3 = migrateV2(store);
 
-  assert.equal(v2.activeTimId, null);
-  assert.equal(v2.activePeriodeId, null);
-  assert.equal(v2.tims.length, 2);
+  assert.equal(v3.activeTimId, null);
+  assert.equal(v3.tims.length, 2);
 });
 
-test('an empty or absent v1 store migrates to an empty v2 store', () => {
-  assert.deepEqual(migrateV1({ version: 1, teams: [] }).tims, []);
-  assert.deepEqual(migrateV1(null).tims, []);
-  assert.equal(migrateV1(null).version, SCHEMA_VERSION);
+test('an empty or absent v2/v1 store migrates to an empty v3 store', () => {
+  assert.deepEqual(migrateV2({ version: 2, tims: [] }).tims, []);
+  assert.deepEqual(migrateV2(null).tims, []);
+  assert.equal(migrateV2(null).version, SCHEMA_VERSION);
+});
+
+test('v2 closed period with snapshot becomes Tim with notes and setorans (no snapshot)', () => {
+  const v3 = migrateV2(legacyStore());
+  const liburan = v3.tims.find((t) => t.id === 'team2');
+
+  assert.equal(liburan.notes.length, 1);
+  assert.equal(liburan.setorans.length, 0);
+  assert.deepEqual(liburan.openingBalances, {});
+});
+
+test('saldoNow works correctly after migration', () => {
+  const v3 = migrateV2(legacyStore());
+  const kantor = v3.tims.find((t) => t.id === 'team1');
+  // Andi: konsumsi 33000 - setoran 10000 = 23000
+  assert.equal(saldoNow(kantor, 'a'), 23000);
+  // Hana: paid 33000 - konsumsi 0 = -33000
+  assert.equal(saldoNow(kantor, 'h'), -33000);
 });

@@ -1,8 +1,8 @@
 /**
- * localStorage adapter for bagirata.v2.
+ * localStorage adapter for bagirata.v3.
  *
  * Only reads and writes the raw store. All arithmetic and schema rules live in
- * domain.js. The v1 key is read once for migration and never written or removed.
+ * domain.js. The v2 key is read once for migration and never written or removed.
  */
 
 import {
@@ -10,7 +10,7 @@ import {
   SCHEMA_VERSION,
   STORAGE_KEY,
   createStore,
-  migrateV1,
+  migrateV2,
 } from './domain.js';
 
 function readJson(key) {
@@ -29,7 +29,6 @@ function normalize(store) {
     version: SCHEMA_VERSION,
     tims: Array.isArray(store.tims) ? store.tims : [],
     activeTimId: store.activeTimId || null,
-    activePeriodeId: store.activePeriodeId || null,
     savedAt: store.savedAt || null,
   };
 }
@@ -40,7 +39,7 @@ export function loadStore() {
 
   const legacy = readJson(LEGACY_STORAGE_KEY);
   if (legacy) {
-    const migrated = normalize(migrateV1(legacy));
+    const migrated = normalize(migrateV2(legacy));
     saveStore(migrated);
     return migrated;
   }
@@ -59,10 +58,9 @@ export function saveStore(store) {
   }
 }
 
-/** Persist which Tim / Periode is open so a reload lands in the same place. */
-export function saveActive(store, timId, periodeId) {
+/** Persist which Tim is open so a reload lands in the same place. */
+export function saveActive(store, timId) {
   const next = normalize(store);
   next.activeTimId = timId || null;
-  next.activePeriodeId = periodeId || null;
   return saveStore(next);
 }

@@ -1,8 +1,9 @@
 /**
- * BagiRata app shell.
+ * BagiRata app shell (simplified).
  *
- * Rendering and navigation only. Every number on screen comes from
- * js/domain.js; nothing here does money arithmetic.
+ * Views: home, create, tim, upload, loading, editor
+ * No Periode, no Settlement screen, no handover log.
+ * One-off mode = Tim that isn't persisted.
  */
 
 import {
@@ -11,41 +12,27 @@ import {
   addSetoran as addSetoranDomain,
   archiveTim,
   canDeleteTim,
-  cascadePreview,
-  closePeriode,
   createTim,
-  currentIndex,
   deleteTim,
   findAnggota,
-  findPeriode,
   findTim,
-  handEnteredOpening,
   handoverHolder,
-  holderAt,
   holderNet,
-  holderNetAt,
   isHolder,
   itemLineTotal,
   kas,
   konsumsi,
-  makePeriode,
-  minimalTransfers,
+  kontribusi,
   notaBreakdown,
   notaGrandTotal,
-  openNewPeriode as openNewPeriodeDomain,
-  openPeriodeOf,
   outstandingAt,
   paidByOf,
   paidByTotal,
-  participantsOf,
-  periodeIndex,
   removeNota,
-  reopenPeriode,
+  removeSetoran,
   rupiah,
   saldoNow,
   setAnggotaStatus,
-  setParticipants,
-  setSaldoAwal,
   settlementRows,
   unarchiveTim,
   updateNota,
@@ -59,7 +46,6 @@ import {
   formatRupiah,
   formatSignedRupiah,
   fromDateInputValue,
-  periodeLabel as labelOf,
   toDateInputValue,
   whatsappSafe,
 } from './format.js';
@@ -75,17 +61,13 @@ let store = loadStore();
 let view = 'home';
 let history = [];
 let activeTimId = null;
-let activePeriodeId = null;
 let oneOff = null;
 let draft = null;
-let participantDraft = null;
 
 const SECTIONS = [
   'homeSection',
   'createTimSection',
   'timSection',
-  'periodeSection',
-  'settlementSection',
   'uploadSection',
   'loadingSection',
   'editorSection',
@@ -106,12 +88,6 @@ function currentTim() {
   return findTim(store, activeTimId);
 }
 
-function currentPeriode() {
-  const tim = currentTim();
-  if (!tim) return null;
-  return findPeriode(tim, activePeriodeId);
-}
-
 /** Persist a Tim; one-off mode is in-memory only and never touches storage. */
 function commitTim(tim) {
   if (oneOff) {
@@ -120,13 +96,13 @@ function commitTim(tim) {
   }
   store = { ...store, tims: store.tims.map((t) => (t.id === tim.id ? tim : t)) };
   saveStore(store);
-  saveActive(store, activeTimId, activePeriodeId);
+  saveActive(store, activeTimId);
 }
 
 function commitStore(nextStore) {
   store = nextStore;
   saveStore(store);
-  saveActive(store, activeTimId, activePeriodeId);
+  saveActive(store, activeTimId);
 }
 
 /* ------------------------------------------------------------------ *
@@ -134,15 +110,13 @@ function commitStore(nextStore) {
  * ------------------------------------------------------------------ */
 
 function render() {
-  if (view === 'editor' && !draft) view = oneOff ? 'upload' : 'periode';
+  if (view === 'editor' && !draft) view = oneOff ? 'upload' : 'tim';
   SECTIONS.forEach((id) => $(id)?.classList.add('hidden'));
 
   const section = {
     home: 'homeSection',
     create: 'createTimSection',
     tim: 'timSection',
-    periode: 'periodeSection',
-    settlement: 'settlementSection',
     upload: 'uploadSection',
     loading: 'loadingSection',
     editor: 'editorSection',
@@ -160,8 +134,6 @@ function render() {
   if (view === 'home') renderHome();
   if (view === 'create') renderCreateTim();
   if (view === 'tim') renderTim();
-  if (view === 'periode') renderPeriode();
-  if (view === 'settlement') renderSettlement();
   if (view === 'upload') renderUpload();
   if (view === 'editor') renderEditor();
 
@@ -169,7 +141,7 @@ function render() {
 }
 
 function navigate(next, { replace = false } = {}) {
-  if (!replace && next !== view) history.push({ view, activeTimId, activePeriodeId });
+  if (!replace && next !== view) history.push({ view, activeTimId });
   view = next;
   render();
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -177,7 +149,6 @@ function navigate(next, { replace = false } = {}) {
 
 function goBack() {
   let previous = history.pop();
-  // A finished draft leaves no editor to return to.
   while (previous && previous.view === 'editor' && !draft) previous = history.pop();
   if (!previous) {
     goHome();
@@ -185,7 +156,6 @@ function goBack() {
   }
   view = previous.view;
   activeTimId = previous.activeTimId;
-  activePeriodeId = previous.activePeriodeId;
   render();
 }
 
@@ -195,10 +165,8 @@ function goHome() {
   draft = null;
   history = [];
   activeTimId = null;
-  activePeriodeId = null;
   view = 'home';
-  // Leaving a one-off split must not touch storage at all.
-  if (!wasOneOff) saveActive(store, null, null);
+  if (!wasOneOff) saveActive(store, null);
   render();
 }
 
@@ -210,20 +178,8 @@ function openTim(timId) {
     goHome();
     return;
   }
-  activePeriodeId = openPeriodeOf(tim)?.id || tim.periods[tim.periods.length - 1]?.id || null;
-  saveActive(store, activeTimId, activePeriodeId);
+  saveActive(store, activeTimId);
   navigate('tim');
-}
-
-function openPeriode(periodeId) {
-  activePeriodeId = periodeId;
-  saveActive(store, activeTimId, activePeriodeId);
-  participantDraft = null;
-  navigate('periode');
-}
-
-function openSettlement() {
-  navigate('settlement');
 }
 
 /* ------------------------------------------------------------------ *
@@ -243,20 +199,16 @@ function renderHome() {
     list.innerHTML = tims
       .map((tim) => {
         const holder = findAnggota(tim, tim.holderId);
-        const open = openPeriodeOf(tim);
         const net = holderNet(tim);
-        const notaCount = (tim.periods || []).reduce((sum, p) => sum + (p.bills || []).length, 0);
+        const notaCount = tim.notes.length;
         return `
           <button onclick="openTim('${tim.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
             <div class="min-w-0">
               <p class="font-bold text-[#3D312A] truncate">${escapeHtml(tim.name)}</p>
               <p class="text-xs text-[#9C6F44] mt-0.5">
-                ${tim.members.length} anggota · ${tim.periods.length} periode · ${notaCount} nota · Holder: ${escapeHtml(holder ? holder.name : '-')}
+                ${tim.members.length} anggota · ${notaCount} nota · ${tim.setorans.length} setoran · Holder: ${escapeHtml(holder ? holder.name : '-')}
               </p>
-              <p class="text-[11px] mt-1 ${open ? 'text-emerald-700' : 'text-[#9C6F44]'}">
-                ${open ? 'Periode terbuka · ' + escapeHtml(labelOf(open, periodeIndex(tim, open.id))) : 'Tidak ada periode terbuka (idle)'}
-                ${net !== 0 ? ` · Holder Net ${formatRupiah(net)}` : ''}
-              </p>
+              ${net !== 0 ? `<p class="text-[11px] mt-1 text-[#6F4E37]">Holder Net ${formatRupiah(net)}</p>` : ''}
             </div>
             <i data-lucide="chevron-right" class="w-5 h-5 text-[#6F4E37] shrink-0"></i>
           </button>`;
@@ -272,12 +224,12 @@ function renderHome() {
     archivedList.innerHTML = archived
       .map((tim) => {
         const holder = findAnggota(tim, tim.holderId);
-        const { owed, credit } = outstandingAt(tim, currentIndex(tim));
+        const { owed, credit } = outstandingAt(tim);
         return `
           <button onclick="openTim('${tim.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
             <div class="min-w-0">
               <p class="font-bold text-[#3D312A] truncate">${escapeHtml(tim.name)}</p>
-              <p class="text-xs text-[#9C6F44] mt-0.5">Holder: ${escapeHtml(holder ? holder.name : '-')} · ${tim.periods.length} periode</p>
+              <p class="text-xs text-[#9C6F44] mt-0.5">Holder: ${escapeHtml(holder ? holder.name : '-')} · ${tim.notes.length} nota</p>
               ${
                 owed !== 0 || credit !== 0
                   ? `<p class="text-[11px] font-semibold text-amber-800 mt-1">Saldo berjalan belum nol — ditagih ${formatRupiah(owed)}${credit !== 0 ? ` · kredit ${formatRupiah(credit)}` : ''}</p>`
@@ -361,16 +313,15 @@ function confirmCreateTim() {
     members: draftMembers,
     holderId,
     now: nowIso(),
-    periodeId: uid('per'),
+    openingBalances: {},
   });
 
   store = { ...store, tims: [...store.tims, tim] };
   saveStore(store);
   draftMembers = [];
   activeTimId = tim.id;
-  activePeriodeId = tim.periods[0].id;
-  saveActive(store, activeTimId, activePeriodeId);
-  showToast('Tim dan periode pertama dibuat.');
+  saveActive(store, activeTimId);
+  showToast('Tim dibuat.');
   navigate('tim');
 }
 
@@ -384,7 +335,7 @@ function renderTim() {
 
   const holder = findAnggota(tim, tim.holderId);
   $('timTitle').textContent = tim.name;
-  $('timSubtitle').textContent = `${holder ? holder.name : '-'} sebagai Holder · ${tim.periods.length} periode · ${tim.members.length} anggota${tim.archivedAt ? ' · diarsipkan' : ''}`;
+  $('timSubtitle').textContent = `${holder ? holder.name : '-'} sebagai Holder · ${tim.members.length} anggota · ${tim.notes.length} nota · ${tim.setorans.length} setoran${tim.archivedAt ? ' · diarsipkan' : ''}`;
 
   $('timActionBar').innerHTML = `
     ${tim.archivedAt
@@ -397,13 +348,12 @@ function renderTim() {
 
   const kasValue = kas(tim);
   $('kasHolderValue').textContent = formatRupiah(kasValue);
-  $('kasHolderHint').textContent = `Uang yang seharusnya dipegang ${holder ? holder.name : 'Holder'} sekarang: cocokkan dengan dompet, bukan error. Dihitung dari semua periode, tidak reset per periode.`;
+  $('kasHolderHint').textContent = `Uang yang seharusnya dipegang ${holder ? holder.name : 'Holder'} sekarang: cocokkan dengan dompet, bukan error.`;
 
   const net = holderNet(tim);
   $('holderNetValue').textContent = formatRupiah(net);
-  $('handoverKasValue').textContent = formatRupiah(kasValue);
 
-  // roster
+  // roster with balances
   const roster = $('rosterList');
   roster.innerHTML = tim.members
     .map((member) => {
@@ -433,65 +383,89 @@ function renderTim() {
     })
     .join('');
 
-  // handover
+  // handover (simplified, no log)
   const candidates = tim.members.filter((m) => m.id !== tim.holderId && m.status !== 'keluar');
   $('handoverSelect').innerHTML = candidates.length
     ? candidates.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')
     : '<option value="">Tidak ada anggota lain yang aktif</option>';
 
-  // The log answers "who was holding the cash on a given date"; the last line
-  // is the same question asked of "now", derived from the log rather than from
-  // the stored role.
-  const holderFromLog = findAnggota(tim, holderAt(tim, null));
-  const logLines = [...tim.handovers]
-    .reverse()
-    .map((event) => {
-      const from = findAnggota(tim, event.fromId);
-      const to = findAnggota(tim, event.toId);
+  // notes
+  const bills = [...tim.notes].sort((a, b) =>
+    String(b.occurredAt || b.createdAt).localeCompare(String(a.occurredAt || a.createdAt))
+  );
+  $('notaCount').textContent = bills.length ? `(${bills.length} nota)` : '';
+  $('notaList').innerHTML =
+    bills.length === 0
+      ? '<p class="text-sm text-[#9C6F44] italic">Belum ada nota.</p>'
+      : bills
+          .map((nota) => {
+            const total = notaGrandTotal(nota);
+            const backdated = isBackdated(nota, tim);
+            const payers = paidByOf(nota, tim)
+              .map((row) => {
+                const member = findAnggota(tim, row.memberId);
+                return `${escapeHtml(member ? member.name : '?')} ${formatRupiah(row.amount)}`;
+              })
+              .join(', ');
+            return `
+              <div class="bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-3 flex items-start justify-between gap-2">
+                <button onclick="editNota('${nota.id}')" class="text-left min-w-0 flex-grow">
+                  <p class="font-semibold text-sm text-[#3D312A] truncate">${escapeHtml(nota.merchant || 'Nota')}</p>
+                  <p class="text-[11px] text-[#9C6F44]">${formatDate(nota.occurredAt)} · ${(nota.items || []).length} item · ${formatRupiah(total)}</p>
+                  <p class="text-[10px] text-[#9C6F44] truncate">dibayar: ${payers}</p>
+                  ${backdated ? '<span class="inline-block mt-1 text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full">Tanggal sebelum anggota bergabung</span>' : ''}
+                </button>
+                <button onclick="removeNotaFromTim('${nota.id}')" class="text-[#9C6F44] hover:text-red-600 p-1 shrink-0"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+              </div>`;
+          })
+          .join('');
+
+  // setorans
+  const setoranCandidates = activeMembers(tim).filter((m) => m.id !== tim.holderId);
+  $('setoranMemberSelect').innerHTML = setoranCandidates.length
+    ? setoranCandidates.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')
+    : '<option value="">Tidak ada anggota non-Holder</option>';
+
+  const deposits = [...tim.setorans].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  $('setoranList').innerHTML =
+    deposits.length === 0
+      ? '<p class="text-[11px] text-[#9C6F44] italic">Belum ada setoran.</p>'
+      : deposits
+          .map((deposit) => {
+            const member = findAnggota(tim, deposit.memberId);
+            const negative = deposit.amount < 0;
+            return `
+              <div class="flex justify-between items-start gap-2 text-xs py-1.5 border-b border-[#E6CCB2]/40">
+                <div class="min-w-0">
+                  <span class="font-semibold ${negative ? 'text-red-700' : 'text-[#3D312A]'}">${escapeHtml(member ? member.name : '?')}${negative ? ' · Pengembalian' : ''}</span>
+                  <span class="block text-[10px] text-[#9C6F44]">${formatDateTime(deposit.at)}${deposit.note ? ' · ' + escapeHtml(deposit.note) : ''}</span>
+                </div>
+                <div class="flex items-center gap-1 shrink-0">
+                  <span class="font-semibold ${negative ? 'text-red-700' : 'text-emerald-700'}">${formatSignedRupiah(deposit.amount)}</span>
+                </div>
+              </div>`;
+          })
+          .join('');
+
+  // settlement rows (live)
+  const rows = settlementRows(tim);
+  $('periodeBalances').innerHTML = rows
+    .map((row) => {
+      const color = colorOf((findAnggota(tim, row.memberId) || {}).colorIndex);
+      const saldoClass = row.saldo > 0 ? 'text-amber-800' : row.saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
       return `
-        <div class="text-[11px] text-[#3D312A] py-1 border-b border-[#E6CCB2]/40">
-          ${formatDateTime(event.at)} · ${escapeHtml(from ? from.name : '-')} → ${escapeHtml(to ? to.name : '-')}
-          ${event.note ? `<span class="block text-[#9C6F44]">${escapeHtml(event.note)}</span>` : ''}
+        <div class="flex justify-between items-center gap-2 py-1.5 border-b border-[#E6CCB2]/40">
+          <div class="min-w-0">
+            <span class="px-2 py-0.5 rounded text-[11px] font-bold ${color.bg} ${color.text}">${escapeHtml(row.name)}</span>
+            ${row.isHolder ? '<span class="text-[10px] uppercase text-[#6F4E37] ml-1">Holder</span>' : ''}
+            <span class="block text-[10px] text-[#9C6F44]">awal ${formatRupiah(row.saldoAwal)} · konsumsi ${formatRupiah(row.konsumsi)} · kontribusi ${formatRupiah(row.kontribusi)}</span>
+          </div>
+          <span class="text-xs font-semibold ${saldoClass} shrink-0">${formatRupiah(row.saldo)}</span>
         </div>`;
     })
     .join('');
 
-  const log = $('handoverLog');
-  log.innerHTML =
-    (tim.handovers.length === 0
-      ? `<p class="text-[11px] text-[#9C6F44] italic">Belum ada serah terima. Holder pertama: ${escapeHtml(holder ? holder.name : '-')}.</p>`
-      : `<p class="text-[10px] font-semibold uppercase tracking-wide text-[#9C6F44]">Riwayat serah terima</p>${logLines}`) +
-    `<p class="text-[11px] font-semibold text-[#3D312A] pt-1">Holder sekarang menurut log: ${escapeHtml(holderFromLog ? holderFromLog.name : '-')}</p>`;
-
-  // One open Periode at a time: the new-Periode form only appears when idle.
-  $('openPeriodeForm').classList.toggle('hidden', Boolean(openPeriodeOf(tim)));
-
-  // periods
-  const periods = [...tim.periods].sort((a, b) => String(a.openedAt).localeCompare(String(b.openedAt)));
-  $('periodeList').innerHTML = periods
-    .map((periode) => {
-      const index = periodeIndex(tim, periode.id);
-      // A closed Periode's figure is its snapshot, never the current position.
-      const net = holderNetAt(tim, index);
-      const netLabel = periode.status === 'closed' ? 'Holder Net saat ditutup' : 'Holder Net berjalan';
-      const badge =
-        periode.status === 'open'
-          ? '<span class="text-[10px] font-semibold uppercase tracking-wide bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full">Terbuka</span>'
-          : '<span class="text-[10px] font-semibold uppercase tracking-wide bg-[#F3ECE0] text-[#6F4E37] px-2 py-1 rounded-full">Ditutup</span>';
-      return `
-        <button onclick="openPeriode('${periode.id}')" class="w-full text-left bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-3 hover:border-[#D4A373] transition flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <p class="font-semibold text-sm text-[#3D312A] truncate">${escapeHtml(labelOf(periode, index))}</p>
-            <p class="text-[11px] text-[#9C6F44]">
-              dibuka ${formatDate(periode.openedAt)}${periode.closedAt ? ' · ditutup ' + formatDate(periode.closedAt) : ''} · ${(periode.bills || []).length} nota · ${(periode.deposits || []).length} setoran
-              ${periode.reDerivedAt ? ' · dihitung ulang ' + formatDate(periode.reDerivedAt) : ''}
-            </p>
-            ${net !== 0 ? `<p class="text-[11px] text-[#6F4E37] mt-0.5">${netLabel} ${formatRupiah(net)}</p>` : ''}
-          </div>
-          ${badge}
-        </button>`;
-    })
-    .join('');
+  $('periodeKasNote').textContent = `Kas Holder: ${formatRupiah(kas(tim))}`;
 }
 
 function addAnggotaToTim() {
@@ -513,7 +487,6 @@ function markAnggotaKeluar(memberId) {
   if (!result.ok) {
     return showModal({
       title: 'Tidak bisa menandai keluar',
-      // The domain states the reason; the app boundary formats the rupiah.
       body: `<p>${escapeHtml(readableRefusal(result))}</p>`,
       confirmLabel: 'Mengerti',
     });
@@ -545,11 +518,9 @@ function confirmHandover() {
       <p>Serahkan peran Holder kepada <strong>${escapeHtml(target ? target.name : '?')}</strong>? Saldo anggota tidak berubah.</p>`,
     confirmLabel: 'Ya, serahkan',
     onConfirm: () => {
-      const note = $('handoverNoteInput').value;
-      const result = handoverHolder(tim, { toId, at: nowIso(), note });
+      const result = handoverHolder(tim, { toId, at: nowIso(), note: '' });
       if (!result.ok) return showModal({ title: 'Serah terima ditolak', body: `<p>${escapeHtml(result.message)}</p>` });
       commitTim(result.tim);
-      $('handoverNoteInput').value = '';
       showToast('Peran Holder diserahkan.');
       render();
     },
@@ -602,456 +573,51 @@ function deleteCurrentTim() {
   });
 }
 
-function openNewPeriode() {
-  const tim = currentTim();
-  if (!tim) return goHome();
-  const label = $('newPeriodeLabel').value.trim();
-  const id = uid('per');
-  const result = openNewPeriodeDomain(tim, { id, label, openedAt: nowIso() });
-  if (!result.ok) return showModal({ title: 'Tidak bisa membuka periode', body: `<p>${escapeHtml(result.message)}</p>` });
-  commitTim(result.tim);
-  $('newPeriodeLabel').value = '';
-  activePeriodeId = id;
-  saveActive(store, activeTimId, activePeriodeId);
-  showToast('Periode baru dibuka.');
-  navigate('periode');
-}
-
 /* ------------------------------------------------------------------ *
- * Periode screen
+ * Upload / OCR
  * ------------------------------------------------------------------ */
 
-function setoranParticipants(tim, periode) {
-  // Setoran is between the Holder and a participant of this Periode. A keluar
-  // Anggota carrying a Saldo is settled by adding them back as a participant
-  // first (ADR-0014 keeps the participant set as the single gate).
-  return participantsOf(tim, periode).filter((m) => m.id !== tim.holderId);
+function startUpload() {
+  navigate('upload');
 }
 
-function renderPeriode() {
-  const tim = currentTim();
-  const periode = currentPeriode();
-  if (!tim || !periode) return goHome();
-
-  const index = periodeIndex(tim, periode.id);
-  const isOpen = periode.status === 'open';
-  const rows = settlementRows(tim, periode);
-
-  $('periodeBreadcrumb').textContent = tim.name;
-  $('periodeTitle').textContent = labelOf(periode, index);
-  $('periodeMeta').textContent =
-    `dibuka ${formatDate(periode.openedAt)}` +
-    (periode.closedAt ? ` · ditutup ${formatDate(periode.closedAt)}` : '') +
-    ` · ${(periode.bills || []).length} nota · ${(periode.deposits || []).length} setoran` +
-    (periode.reDerivedAt ? ` · dihitung ulang ${formatDate(periode.reDerivedAt)}` : '');
-
-  $('periodeActions').innerHTML = `
-    ${isOpen
-      ? `<button onclick="editPeriodeLabel()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1"><i data-lucide="pencil" class="w-3.5 h-3.5"></i> Ubah label</button>
-         <button onclick="openSettlement()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1"><i data-lucide="table" class="w-3.5 h-3.5"></i> Settlement (pratinjau)</button>
-         <button onclick="confirmClosePeriode()" class="text-xs font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-2 rounded-lg transition flex items-center gap-1"><i data-lucide="lock" class="w-3.5 h-3.5"></i> Tutup Periode</button>`
-      : `<button onclick="openSettlement()" class="text-xs font-semibold text-[#6F4E37] bg-[#F3ECE0] hover:bg-[#E6CCB2] px-3 py-2 rounded-lg border border-[#E6CCB2] transition flex items-center gap-1"><i data-lucide="table" class="w-3.5 h-3.5"></i> Settlement (snapshot)</button>
-         <button onclick="confirmReopenPeriode()" class="text-xs font-bold bg-[#6F4E37] text-[#FDFBF7] hover:bg-[#5C3D2E] px-3 py-2 rounded-lg transition flex items-center gap-1"><i data-lucide="unlock" class="w-3.5 h-3.5"></i> Buka kembali</button>`}
-  `;
-
-  // participants
-  if (!participantDraft) participantDraft = new Set(periode.participants || []);
-  $('participantsList').innerHTML = tim.members
-    .map((member) => {
-      const color = colorOf(member.colorIndex);
-      const selected = participantDraft.has(member.id);
-      const holderLocked = isHolder(tim, member.id);
-      const consumed = konsumsi(tim, periode, member.id);
-      return `
-        <button ${isOpen && !holderLocked ? `onclick="toggleParticipant('${member.id}')"` : 'disabled'}
-          class="px-3 py-1.5 rounded-xl border text-xs font-bold transition ${selected ? `${color.bg} ${color.text} ${color.border}` : 'bg-[#FDFBF7] text-[#9C6F44] border-[#E6CCB2]'} ${!isOpen || holderLocked ? 'opacity-70 cursor-default' : ''}">
-          ${escapeHtml(member.name)}${holderLocked ? ' · Holder' : ''}${consumed ? ` · ${formatRupiah(consumed)}` : ''}${selected ? '' : ' · tidak dipilih'}
-        </button>`;
-    })
-    .join('');
-  $('participantHelper').textContent = isOpen
-    ? 'Holder selalu peserta dan tidak bisa dilepas. Peserta yang sudah punya konsumsi di periode ini tidak bisa dikeluarkan.'
-    : 'Periode sudah ditutup. Buka kembali untuk mengubah peserta.';
-  $('saveParticipantsBtn').classList.toggle('hidden', !isOpen);
-
-  // nota
-  const bills = [...(periode.bills || [])].sort((a, b) =>
-    String(b.occurredAt || b.createdAt).localeCompare(String(a.occurredAt || a.createdAt))
-  );
-  $('notaCount').textContent = bills.length ? `(${bills.length} nota)` : '';
-  $('notaList').innerHTML =
-    bills.length === 0
-      ? '<p class="text-sm text-[#9C6F44] italic">Belum ada nota di periode ini.</p>'
-      : bills
-          .map((nota) => {
-            const total = notaGrandTotal(nota);
-            const backdated = isBackdated(nota, tim, participantsOf(tim, periode));
-            const payers = paidByOf(nota, tim)
-              .map((row) => {
-                const member = findAnggota(tim, row.memberId);
-                return `${escapeHtml(member ? member.name : '?')} ${formatRupiah(row.amount)}`;
-              })
-              .join(', ');
-            return `
-              <div class="bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-3 flex items-start justify-between gap-2">
-                <button onclick="editNota('${nota.id}')" class="text-left min-w-0 flex-grow">
-                  <p class="font-semibold text-sm text-[#3D312A] truncate">${escapeHtml(nota.merchant || 'Nota')}</p>
-                  <p class="text-[11px] text-[#9C6F44]">${formatDate(nota.occurredAt)} · ${(nota.items || []).length} item · ${formatRupiah(total)}</p>
-                  <p class="text-[10px] text-[#9C6F44] truncate">dibayar: ${payers}</p>
-                  ${backdated ? '<span class="inline-block mt-1 text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full">Tanggal sebelum anggota bergabung</span>' : ''}
-                </button>
-                ${isOpen ? `<button onclick="removeNotaFromPeriode('${nota.id}')" class="text-[#9C6F44] hover:text-red-600 p-1 shrink-0"><i data-lucide="trash-2" class="w-4 h-4"></i></button>` : ''}
-              </div>`;
-          })
-          .join('');
-  $('addNotaBtn').classList.toggle('hidden', !isOpen);
-
-  // setoran
-  const candidates = setoranParticipants(tim, periode);
-  $('setoranMemberSelect').innerHTML = candidates.length
-    ? candidates.map((m) => `<option value="${m.id}">${escapeHtml(m.name)}</option>`).join('')
-    : '<option value="">Tidak ada peserta non-Holder</option>';
-  $('setoranForm').classList.toggle('hidden', !isOpen);
-
-  const deposits = [...(periode.deposits || [])].sort((a, b) => String(b.at).localeCompare(String(a.at)));
-  $('setoranList').innerHTML =
-    deposits.length === 0
-      ? '<p class="text-[11px] text-[#9C6F44] italic">Belum ada setoran.</p>'
-      : deposits
-          .map((deposit) => {
-            const member = findAnggota(tim, deposit.memberId);
-            const negative = deposit.amount < 0;
-            return `
-              <div class="flex justify-between items-start gap-2 text-xs py-1.5 border-b border-[#E6CCB2]/40">
-                <div class="min-w-0">
-                  <span class="font-semibold ${negative ? 'text-red-700' : 'text-[#3D312A]'}">${escapeHtml(member ? member.name : '?')}${negative ? ' · Pengembalian' : ''}</span>
-                  <span class="block text-[10px] text-[#9C6F44]">${formatDateTime(deposit.at)}${deposit.note ? ' · ' + escapeHtml(deposit.note) : ''}</span>
-                </div>
-                <div class="flex items-center gap-1 shrink-0">
-                  <span class="font-semibold ${negative ? 'text-red-700' : 'text-emerald-700'}">${formatSignedRupiah(deposit.amount)}</span>
-                </div>
-              </div>`;
-          })
-          .join('');
-
-  // balances
-  $('periodeBalances').innerHTML = rows
-    .map((row) => {
-      const color = colorOf((findAnggota(tim, row.memberId) || {}).colorIndex);
-      const saldoClass = row.saldo > 0 ? 'text-amber-800' : row.saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
-      return `
-        <div class="flex justify-between items-center gap-2 py-1.5 border-b border-[#E6CCB2]/40">
-          <div class="min-w-0">
-            <span class="px-2 py-0.5 rounded text-[11px] font-bold ${color.bg} ${color.text}">${escapeHtml(row.name)}</span>
-            ${row.isHolder ? '<span class="text-[10px] uppercase text-[#6F4E37] ml-1">Holder</span>' : ''}
-            <span class="block text-[10px] text-[#9C6F44]">awal ${formatRupiah(row.saldoAwal)} · konsumsi ${formatRupiah(row.konsumsi)} · kontribusi ${formatRupiah(row.kontribusi)}</span>
-          </div>
-          <span class="text-xs font-semibold ${saldoClass} shrink-0">${formatRupiah(row.saldo)}</span>
-        </div>`;
-    })
-    .join('');
-
-  const snapshotKas = periode.snapshot ? ` · kas saat ditutup ${formatRupiah(periode.snapshot.kas)}` : '';
-  $('periodeKasNote').textContent = `Kas Holder (Tim-wide, bukan per periode): ${formatRupiah(kas(tim))}${snapshotKas}`;
-
-  renderSaldoAwal(tim, periode, index, isOpen);
-}
-
-/**
- * Hand-entered opening balance, first Periode only (ADR-0021). Every later
- * Periode reads its Saldo Awal from the chain and has no editor here.
- */
-function renderSaldoAwal(tim, periode, index, isOpen) {
-  const card = $('saldoAwalCard');
-  const show = index === 0 && isOpen;
-  card.classList.toggle('hidden', !show);
-  if (!show) return;
-
-  $('saldoAwalRows').innerHTML = participantsOf(tim, periode)
-    .map((member) => {
-      const value = handEnteredOpening(tim, member.id);
-      return `
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-xs font-semibold text-[#3D312A] truncate">${escapeHtml(member.name)}
-            ${value !== 0 ? '<span class="text-[10px] font-normal text-amber-700">· diisi manual</span>' : ''}
-          </span>
-          <input type="number" value="${value || ''}" placeholder="0"
-            onchange="handleSetSaldoAwal('${member.id}', this.value)"
-            class="w-32 px-2 py-1.5 text-right bg-[#FAF6F0] border border-[#E6CCB2] rounded-lg text-xs focus:outline-none focus:border-[#6F4E37]">
-        </div>`;
-    })
-    .join('');
-}
-
-function handleSetSaldoAwal(memberId, value) {
-  const tim = currentTim();
-  const periode = currentPeriode();
-  const result = setSaldoAwal(tim, periode.id, memberId, Number(value) || 0);
-  if (!result.ok) return showModal({ title: 'Saldo Awal tidak bisa diubah', body: `<p>${escapeHtml(result.message)}</p>` });
-  commitTim(result.tim);
-  render();
-}
-
-function editPeriodeLabel() {
-  const tim = currentTim();
-  const periode = currentPeriode();
-  const value = window.prompt('Label periode (kosongkan untuk label otomatis)', periode.label || '');
-  if (value === null) return;
-  const next = { ...periode, label: value.trim() || null };
-  const updated = { ...tim, periods: tim.periods.map((p) => (p.id === periode.id ? next : p)) };
-  commitTim(updated);
-  render();
-}
-
-function toggleParticipant(memberId) {
-  if (!participantDraft) return;
-  if (participantDraft.has(memberId)) participantDraft.delete(memberId);
-  else participantDraft.add(memberId);
-  renderPeriode();
+function renderUpload() {
+  $('uploadTitle').textContent = oneOff ? 'Split Sekali Pakai' : 'Tambah Nota';
+  $('uploadSubtitle').textContent = oneOff
+    ? 'Foto nota atau isi manual. Mode sekali pakai tidak menyimpan apa pun ke perangkat.'
+    : 'Foto nota, unggah gambar, atau isi manual.';
   icons();
 }
 
-function saveParticipants() {
+function startManualNota() {
   const tim = currentTim();
-  const periode = currentPeriode();
-  const result = setParticipants(tim, periode.id, [...(participantDraft || [])]);
-  if (!result.ok) {
-    return showModal({ title: 'Peserta tidak bisa disimpan', body: `<p>${escapeHtml(result.message)}</p>` });
-  }
-  commitTim(result.tim);
-  participantDraft = null;
-  showToast('Peserta periode disimpan.');
-  render();
+  if (!tim) return goHome();
+
+  draft = {
+    notaId: null,
+    nota: blankNota(),
+    payersAuto: true,
+    fuente: 'manual',
+  };
+  syncDraftPayerDefault();
+  navigate('editor');
 }
 
-function addSetoran() {
+function editNota(notaId) {
   const tim = currentTim();
-  const periode = currentPeriode();
-  const memberId = $('setoranMemberSelect').value;
-  const amount = Number($('setoranAmount').value) || 0;
-  const note = $('setoranNote').value;
-
-  const result = addSetoranDomain(tim, periode.id, { id: uid('dep'), memberId, amount, note }, nowIso());
-  if (!result.ok) {
-    return showModal({ title: 'Setoran tidak bisa disimpan', body: `<p>${escapeHtml(result.message)}</p>` });
-  }
-  commitTim(result.tim);
-  $('setoranAmount').value = '';
-  $('setoranNote').value = '';
-  showToast('Setoran dicatat.');
-  render();
-}
-
-function removeNotaFromPeriode(notaId) {
-  const tim = currentTim();
-  const nota = (currentPeriode().bills || []).find((b) => b.id === notaId);
-  showModal({
-    title: 'Hapus Nota',
-    body: `<p>Hapus nota <strong>${escapeHtml(nota ? nota.merchant : 'ini')}</strong>? Konsumsi terkait ikut hilang.</p>`,
-    confirmLabel: 'Hapus',
-    danger: true,
-    onConfirm: () => {
-      const result = removeNota(currentTim(), activePeriodeId, notaId);
-      if (!result.ok) return showModal({ title: 'Tidak bisa menghapus', body: `<p>${escapeHtml(result.message)}</p>` });
-      commitTim(result.tim);
-      render();
+  if (!tim) return;
+  const nota = tim.notes.find((b) => b.id === notaId);
+  if (!nota) return;
+  draft = {
+    notaId,
+    nota: {
+      ...JSON.parse(JSON.stringify(nota)),
+      paidBy: paidByOf(nota, tim).map((row) => ({ ...row })),
     },
-  });
-}
-
-function confirmClosePeriode() {
-  const tim = currentTim();
-  const periode = currentPeriode();
-  const rows = settlementRows(tim, periode);
-  const net = holderNetAt(tim, periodeIndex(tim, periode.id));
-  showModal({
-    title: 'Tutup Periode',
-    body: `
-      <p>Snapshot Settlement akan disimpan: ${rows.length} peserta, ${(periode.bills || []).length} nota.</p>
-      <p>Setelah ditutup, nota dan setoran tidak bisa diubah sampai periode dibuka kembali.</p>
-      <p class="text-xs text-[#9C6F44]">Holder Net saat ini ${formatRupiah(net)}. Tidak ada syarat "harus balance".</p>`,
-    confirmLabel: 'Tutup periode',
-    onConfirm: () => {
-      const result = closePeriode(currentTim(), periode.id, nowIso());
-      if (!result.ok) return showModal({ title: 'Tidak bisa menutup', body: `<p>${escapeHtml(result.message)}</p>` });
-      commitTim(result.tim);
-      showToast('Periode ditutup dan Settlement disimpan.');
-      render();
-    },
-  });
-}
-
-function confirmReopenPeriode() {
-  const tim = currentTim();
-  const periode = currentPeriode();
-  const cascade = cascadePreview(tim, periode.id);
-
-  const cascadeHtml = cascade.length
-    ? `<p class="font-semibold">Periode berikut ikut berubah Saldo Awal-nya:</p>
-       <ul class="text-xs space-y-1">
-         ${cascade
-           .map(
-             (item) =>
-               `<li>• ${escapeHtml(labelOf({ ...tim.periods[item.index] }, item.index))} — ${item.status === 'closed' ? `terakhir dihitung ${formatDate(item.lastDerivedAt)}` : 'masih terbuka'}</li>`
-           )
-           .join('')}
-       </ul>
-       <p class="text-xs text-[#9C6F44]">Setoran dan Pengembalian tidak berubah. Hanya Saldo Awal yang ikut rantai.</p>`
-    : '<p>Tidak ada periode setelah ini, jadi tidak ada Saldo Awal yang ikut berubah.</p>';
-
-  showModal({
-    title: 'Buka kembali Periode',
-    body: `<p>Buka kembali <strong>${escapeHtml(labelOf(periode, periodeIndex(tim, periode.id)))}</strong>? Snapshot yang lama tidak lagi ditampilkan.</p>${cascadeHtml}`,
-    confirmLabel: 'Buka kembali',
-    onConfirm: () => {
-      const result = reopenPeriode(currentTim(), periode.id, nowIso());
-      if (!result.ok) return showModal({ title: 'Tidak bisa membuka', body: `<p>${escapeHtml(result.message)}</p>` });
-      commitTim(result.tim);
-      showToast('Periode dibuka kembali.');
-      render();
-    },
-  });
-}
-
-/* ------------------------------------------------------------------ *
- * Settlement
- * ------------------------------------------------------------------ */
-
-function renderSettlement() {
-  const tim = currentTim();
-  const periode = currentPeriode();
-  if (!tim || !periode) return goHome();
-
-  const index = periodeIndex(tim, periode.id);
-  const rows = settlementRows(tim, periode);
-  const isClosed = periode.status === 'closed';
-  const reDerived = rows.some((row) => row.source === 're-derived');
-  const holder = findAnggota(tim, tim.holderId);
-
-  $('settlementTitle').textContent = labelOf(periode, index);
-  $('settlementSubtitle').textContent = `${tim.name} · ${(periode.bills || []).length} nota · Holder: ${holder ? holder.name : '-'}`;
-  $('settlementBadge').textContent = isClosed
-    ? `Snapshot · ditutup ${formatDate(periode.closedAt)}${reDerived ? ` · dihitung ulang ${formatDate(periode.reDerivedAt)} dari rantai Saldo Awal` : ''}`
-    : 'Pratinjau · dihitung langsung, belum jadi pernyataan';
-
-  $('settlementRows').innerHTML = rows
-    .map((row) => {
-      const color = colorOf((findAnggota(tim, row.memberId) || {}).colorIndex);
-      const saldoClass = row.saldo > 0 ? 'text-amber-800' : row.saldo < 0 ? 'text-emerald-700' : 'text-[#9C6F44]';
-      // The Holder's sign is a position, not a debt: never present it as a Saldo.
-      const saldoLabel = row.isHolder
-        ? 'Posisi Holder · bukan utang'
-        : row.saldo > 0
-          ? `Utang ke ${escapeHtml(holder ? holder.name : 'Holder')}`
-          : row.saldo < 0
-            ? 'Kredit dari Holder'
-            : 'Lunas';
-      return `
-        <div class="rounded-xl p-4 border ${row.isHolder ? 'border-[#D4A373] bg-[#F3ECE0]' : 'border-[#E6CCB2] bg-[#FAF6F0]'} space-y-2">
-          <div class="flex items-center justify-between gap-2 flex-wrap">
-            <div class="flex items-center gap-2">
-              <span class="px-2.5 py-1 rounded-lg text-xs font-bold ${color.bg} ${color.text}">${escapeHtml(row.name)}</span>
-              ${row.isHolder ? '<span class="text-[10px] font-semibold uppercase text-[#6F4E37]">Holder</span>' : ''}
-              ${row.status === 'keluar' ? '<span class="text-[10px] font-semibold uppercase text-amber-700">keluar</span>' : ''}
-            </div>
-            <div class="text-right">
-              <p class="text-sm font-bold ${saldoClass}">${formatRupiah(row.saldo)}</p>
-              <p class="text-[10px] text-[#9C6F44]">${saldoLabel}</p>
-            </div>
-          </div>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 text-[11px]">
-            <div><span class="text-[#9C6F44] block">Saldo Awal</span><span class="font-semibold">${formatRupiah(row.saldoAwal)}</span>${row.handEnteredAwal ? '<span class="block text-[9px] text-amber-700">diisi manual</span>' : ''}</div>
-            <div><span class="text-[#9C6F44] block">Konsumsi</span><span class="font-semibold">${formatRupiah(row.konsumsi)}</span></div>
-            <div><span class="text-[#9C6F44] block">Kontribusi</span><span class="font-semibold">${formatRupiah(row.kontribusi)}</span></div>
-            <div><span class="text-[#9C6F44] block">${row.isHolder ? 'Posisi Holder' : 'Saldo berjalan'}</span><span class="font-semibold ${saldoClass}">${formatRupiah(row.saldo)}</span></div>
-          </div>
-        </div>`;
-    })
-    .join('');
-
-  // Cara bayar paling ringkas — derived, never stored, secondary to vs-Holder.
-  const transfers = minimalTransfers(rows);
-  const block = $('minimalTransfers');
-  if (transfers.length === 0) {
-    block.innerHTML = '';
-  } else {
-    block.innerHTML = `
-      <div class="bg-[#F3ECE0] border border-[#E6CCB2] rounded-xl p-4 space-y-2">
-        <p class="text-xs font-bold text-[#3D312A]">Cara bayar paling ringkas</p>
-        <p class="text-[10px] text-[#9C6F44]">${isClosed ? `Dihitung dari saldo saat periode ditutup (${formatDate(periode.closedAt)}), bukan saran saat ini.` : 'Dihitung dari saldo berjalan sekarang. Ini saran antar-anggota, bukan pengganti daftar vs Holder.'}</p>
-        ${transfers
-          .map((transfer) => {
-            const from = findAnggota(tim, transfer.fromId);
-            const to = findAnggota(tim, transfer.toId);
-            return `<p class="text-xs text-[#3D312A]">${escapeHtml(from ? from.name : '?')} → ${escapeHtml(to ? to.name : '?')}: <strong>${formatRupiah(transfer.amount)}</strong></p>`;
-          })
-          .join('')}
-      </div>`;
-  }
-
-  const net = holderNetAt(tim, index);
-  const outstanding = outstandingAt(tim, index);
-  $('settlementMeta').innerHTML = `
-    <div class="bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4">
-      <p class="text-[10px] font-semibold uppercase tracking-wider text-[#9C6F44]">Holder Net — akan ditagih</p>
-      <p class="text-lg font-bold text-[#6F4E37]">${formatRupiah(net)}</p>
-      <p class="text-[10px] text-[#9C6F44]">Ditagih ${formatRupiah(outstanding.owed)} · kredit ${formatRupiah(outstanding.credit)} · konsumsi Holder sendiri tidak dihitung utang</p>
-    </div>
-    <div class="bg-[#FAF6F0] border border-[#E6CCB2] rounded-xl p-4">
-      <p class="text-[10px] font-semibold uppercase tracking-wider text-[#9C6F44]">Kas Holder — uang yang dipegang</p>
-      <p class="text-lg font-bold text-[#3D312A]">${formatRupiah(kas(tim))}</p>
-      <p class="text-[10px] text-[#9C6F44]">Tim-wide, tidak reset per periode. Cocokkan dengan uang fisik di dompet — ini petunjuk rekonsiliasi, bukan error. Angka terpisah dari Holder Net.</p>
-    </div>`;
-}
-
-function copySettlementWA() {
-  const tim = currentTim();
-  const periode = currentPeriode();
-  if (!tim || !periode) return;
-  const index = periodeIndex(tim, periode.id);
-  const rows = settlementRows(tim, periode);
-  const holder = findAnggota(tim, tim.holderId);
-  const holderName = whatsappSafe(holder ? holder.name : 'Holder');
-  const isClosed = periode.status === 'closed';
-  const transfers = minimalTransfers(rows);
-
-  // WhatsApp renders plain text, so free text is stripped of line breaks and
-  // emphasis markers rather than HTML-escaped (which would print literally).
-  let text = `📒 *SETTLEMENT — ${whatsappSafe(tim.name)}*\n`;
-  text += `Periode: ${whatsappSafe(labelOf(periode, index))}${isClosed ? ` (snapshot ${formatDate(periode.closedAt)})` : ' (pratinjau)'}\n`;
-  text += `Holder: *${holderName}*\n`;
-  text += '-----------------------------------------\n';
-
-  for (const row of rows) {
-    if (row.isHolder) continue;
-    const label = row.saldo > 0 ? `utang ke ${holderName}` : row.saldo < 0 ? `kredit dari ${holderName}` : 'lunas';
-    text += `👤 *${whatsappSafe(row.name)}*\n`;
-    text += `   Saldo awal ${formatRupiah(row.saldoAwal)} · konsumsi ${formatRupiah(row.konsumsi)} · kontribusi ${formatRupiah(row.kontribusi)}\n`;
-    text += `   *Saldo berjalan: ${formatRupiah(row.saldo)} (${label})*\n`;
-    text += '-----------------------------------------\n';
-  }
-
-  if (holder) {
-    text += `💼 *${holderName}* (Holder)\n`;
-    text += `   konsumsi sendiri ${formatRupiah(konsumsi(tim, periode, holder.id))}\n`;
-    text += `   net akan ditagih: ${formatRupiah(holderNetAt(tim, index))}\n`;
-    text += `   kas yang dipegang: ${formatRupiah(kas(tim))}\n`;
-  }
-
-  if (transfers.length > 0) {
-    text += '-----------------------------------------\n';
-    text += `🔁 *Cara bayar paling ringkas* (${isClosed ? 'per saat penutupan' : 'dari saldo berjalan'}):\n`;
-    for (const transfer of transfers) {
-      const from = findAnggota(tim, transfer.fromId);
-      const to = findAnggota(tim, transfer.toId);
-      text += `   ${whatsappSafe(from ? from.name : '?')} → ${whatsappSafe(to ? to.name : '?')}: ${formatRupiah(transfer.amount)}\n`;
-    }
-  }
-
-  text += '-----------------------------------------\n';
-  text += `Transfer utama ke *${holderName}*. Dihitung via BagiRata.ai.`;
-  copyToClipboard(text);
-  showToast('Ringkasan Settlement disalin!');
+    payersAuto: false,
+    fuente: 'edit',
+  };
+  navigate('editor');
 }
 
 /* ------------------------------------------------------------------ *
@@ -1072,85 +638,14 @@ function blankNota() {
   };
 }
 
-function startUpload() {
-  navigate('upload');
-}
-
-function renderUpload() {
-  $('uploadTitle').textContent = oneOff ? 'Split Sekali Pakai' : 'Tambah Nota';
-  $('uploadSubtitle').textContent = oneOff
-    ? 'Foto nota atau isi manual. Mode sekali pakai tidak menyimpan apa pun ke perangkat.'
-    : 'Foto nota, unggah gambar, atau isi manual.';
-  icons();
-}
-
-function startManualNota() {
-  const tim = currentTim();
-  if (!tim) return goHome();
-  const periode = currentPeriode();
-  if (!periode) {
-    return showModal({ title: 'Belum ada periode', body: '<p>Buka periode baru dulu sebelum menambah nota.</p>' });
-  }
-  if (periode.status !== 'open') {
-    return showModal({
-      title: 'Periode sudah ditutup',
-      body: '<p>Buka kembali periode, perbaiki, lalu tutup lagi. Nota tidak bisa ditulis ke periode tertutup.</p>',
-    });
-  }
-
-  draft = {
-    periodeId: periode.id,
-    notaId: null,
-    nota: blankNota(),
-    payersAuto: true,
-    fuente: 'manual',
-  };
-  syncDraftPayerDefault();
-  navigate('editor');
-}
-
-function editNota(notaId) {
-  const tim = currentTim();
-  const periode = currentPeriode();
-  if (!tim || !periode) return;
-  if (periode.status !== 'open') {
-    return showModal({
-      title: 'Periode sudah ditutup',
-      body: '<p>Buka kembali periode dulu kalau nota ini perlu diperbaiki.</p>',
-    });
-  }
-  const nota = (periode.bills || []).find((b) => b.id === notaId);
-  if (!nota) return;
-  draft = {
-    periodeId: periode.id,
-    notaId,
-    nota: {
-      ...JSON.parse(JSON.stringify(nota)),
-      paidBy: paidByOf(nota, tim).map((row) => ({ ...row })),
-    },
-    payersAuto: false,
-    fuente: 'edit',
-  };
-  navigate('editor');
-}
-
 function editorTim() {
   return currentTim();
 }
 
-function editorPeriode() {
-  const tim = editorTim();
-  if (!tim) return null;
-  if (oneOff) return tim.periods[0];
-  return findPeriode(tim, draft.periodeId);
-}
-
 function editorParticipants() {
   const tim = editorTim();
-  const periode = editorPeriode();
-  if (!tim || !periode) return [];
-  if (oneOff) return tim.members;
-  return participantsOf(tim, periode);
+  if (!tim) return [];
+  return activeMembers(tim);
 }
 
 function syncDraftPayerDefault() {
@@ -1170,7 +665,6 @@ function draftChange(field, value) {
   else draft.nota[field] = value;
 
   if (field === 'merchant') {
-    // Cosmetic only: totals, payers and the back-date badge are unaffected.
     renderEditorSummary();
     return;
   }
@@ -1180,15 +674,12 @@ function draftChange(field, value) {
 
 function renderEditor() {
   const tim = editorTim();
-  const periode = editorPeriode();
-  if (!draft || !tim || !periode) return goHome();
+  if (!draft || !tim) return goHome();
 
   $('merchantName').value = draft.nota.merchant || '';
   $('notaDateInput').value = toDateInputValue(draft.nota.occurredAt);
-  $('editorContext').textContent = oneOff
-    ? 'Mode sekali pakai · tidak disimpan'
-    : `${tim.name} · ${labelOf(periode, periodeIndex(tim, periode.id))}`;
-  $('editorRosterTitle').textContent = oneOff ? 'Anggota (sekali pakai)' : 'Peserta Periode';
+  $('editorContext').textContent = oneOff ? 'Mode sekali pakai · tidak disimpan' : `${tim.name}`;
+  $('editorRosterTitle').textContent = oneOff ? 'Anggota (sekali pakai)' : 'Anggota';
   $('editorAddMemberWrap').classList.toggle('hidden', !oneOff);
   $('taxInput').value = draft.nota.tax || '';
   $('serviceInput').value = draft.nota.service || '';
@@ -1235,12 +726,12 @@ function renderItems() {
               .map((member) => {
                 const color = colorOf(member.colorIndex);
                 const chosen = (item.assignedTo || []).includes(member.id);
-                return `<button onclick="toggleItemAssignment('${item.id}', '${member.id}')" class="text-[11px] font-semibold px-2.5 py-1 rounded-full border transition flex items-center gap-1 ${chosen ? `${color.bg} ${color.text} ${color.border}` : 'bg-[#FDFBF7] text-[#6F4E37] border-[#E6CCB2] hover:bg-[#F3ECE0]'}">
+                return `<button onclick="toggleItemAssignment('${item.id}', '${member.id}')" class="text-[11px] font-semibold px-2.5 py-1 rounded-full border transition flex items-center gap-1 ${chosen ? `${color.bg} ${color.text} ${color.border}` : 'bg-[#FDFBF7] text-[#6F4E37] border-[#E6CCB2] hover:bg-[#F3ECE0]'}>
                   ${escapeHtml(member.name)}${chosen ? '<i data-lucide="check" class="w-3 h-3"></i>' : ''}
                 </button>`;
               })
               .join('')}
-            ${participants.length === 0 ? '<span class="text-[11px] text-[#9C6F44] italic">' + (oneOff ? 'Tambahkan anggota dulu.' : 'Periode ini belum punya peserta.') + '</span>' : ''}
+            ${participants.length === 0 ? '<span class="text-[11px] text-[#9C6F44] italic">Tambahkan anggota dulu.</span>' : ''}
           </div>
         </div>`;
     })
@@ -1337,7 +828,7 @@ function renderEditorSummary() {
           .join('');
 }
 
-function isBackdated(nota, tim, participants) {
+function isBackdated(nota, tim) {
   const occurred = nota.occurredAt || nota.createdAt;
   if (!occurred) return false;
   const touched = new Set();
@@ -1352,7 +843,7 @@ function isBackdated(nota, tim, participants) {
 function renderBackdateWarning() {
   const tim = editorTim();
   const box = $('backdateWarning');
-  if (isBackdated(draft.nota, tim, editorParticipants())) {
+  if (isBackdated(draft.nota, tim)) {
     box.classList.remove('hidden');
     box.innerHTML =
       '<strong>Tanggal nota sebelum ada anggota bergabung.</strong> Nota tetap bisa disimpan, tapi periksa lagi siapa yang menanggung item ini.';
@@ -1396,7 +887,7 @@ function toggleItemAssignment(itemId, memberId) {
 function bagiRataUnassigned() {
   const participants = editorParticipants();
   if (participants.length === 0) {
-    return showModal({ title: 'Belum ada peserta', body: '<p>Tambahkan anggota atau peserta periode dulu.</p>' });
+    return showModal({ title: 'Belum ada peserta', body: '<p>Tambahkan anggota dulu.</p>' });
   }
   let count = 0;
   draft.nota.items.forEach((item) => {
@@ -1406,7 +897,7 @@ function bagiRataUnassigned() {
     }
   });
   renderEditor();
-  showToast(count ? `${count} item dibagi rata ke ${participants.length} peserta periode ini.` : 'Semua item sudah punya pemilih.');
+  showToast(count ? `${count} item dibagi rata ke ${participants.length} anggota.` : 'Semua item sudah punya pemilih.');
 }
 
 function addPayerRow() {
@@ -1454,7 +945,7 @@ function addEditorMember() {
 function cancelEditor() {
   draft = null;
   if (oneOff) navigate('upload', { replace: true });
-  else navigate('periode', { replace: true });
+  else navigate('tim', { replace: true });
 }
 
 function confirmResetDraft() {
@@ -1476,8 +967,7 @@ function confirmResetDraft() {
 
 function saveNota() {
   const tim = editorTim();
-  const periode = editorPeriode();
-  if (!draft || !tim || !periode) return;
+  if (!draft || !tim) return;
 
   const nota = {
     ...draft.nota,
@@ -1487,8 +977,8 @@ function saveNota() {
   };
 
   let result;
-  if (draft.notaId) result = updateNota(tim, periode.id, nota, nowIso());
-  else result = addNota(tim, periode.id, nota, nowIso());
+  if (draft.notaId) result = updateNota(tim, nota, nowIso());
+  else result = addNota(tim, nota, nowIso());
 
   if (!result.ok) {
     const errors = result.errors || [{ message: result.message }];
@@ -1500,14 +990,30 @@ function saveNota() {
 
   commitTim(result.tim);
   draft = null;
-  showToast(oneOff ? 'Nota dihitung. Tidak ada yang disimpan.' : 'Nota tersimpan di periode ini.');
+  showToast(oneOff ? 'Nota dihitung. Tidak ada yang disimpan.' : 'Nota tersimpan.');
 
   if (oneOff) {
-    activePeriodeId = periode.id;
-    navigate('settlement', { replace: true });
+    navigate('tim', { replace: true });
   } else {
-    navigate('periode', { replace: true });
+    navigate('tim', { replace: true });
   }
+}
+
+function removeNotaFromTim(notaId) {
+  const tim = currentTim();
+  const nota = tim.notes.find((b) => b.id === notaId);
+  showModal({
+    title: 'Hapus Nota',
+    body: `<p>Hapus nota <strong>${escapeHtml(nota ? nota.merchant : 'ini')}</strong>? Konsumsi terkait ikut hilang.</p>`,
+    confirmLabel: 'Hapus',
+    danger: true,
+    onConfirm: () => {
+      const result = removeNota(currentTim(), notaId);
+      if (!result.ok) return showModal({ title: 'Tidak bisa menghapus', body: `<p>${escapeHtml(result.message)}</p>` });
+      commitTim(result.tim);
+      render();
+    },
+  });
 }
 
 /* ------------------------------------------------------------------ *
@@ -1522,14 +1028,14 @@ function startOneTime() {
       name: 'Sekali Pakai',
       members: [],
       holderId: null,
-      periods: [makePeriode({ id: uid('per'), label: 'Sekali Pakai', openedAt: now, participants: [] })],
-      handovers: [],
+      notes: [],
+      setorans: [],
+      openingBalances: {},
       archivedAt: null,
       createdAt: now,
     },
   };
   activeTimId = null;
-  activePeriodeId = oneOff.tim.periods[0].id;
   draft = null;
   history = [];
   navigate('upload');
@@ -1605,9 +1111,8 @@ function handleFileSelect(event) {
 function ensureDraftForParsed() {
   if (draft) return;
   const tim = currentTim();
-  const periode = currentPeriode() || (oneOff ? oneOff.tim.periods[0] : null);
-  if (!tim || !periode) return;
-  draft = { periodeId: periode.id, notaId: null, nota: blankNota(), payersAuto: true, source: 'ocr' };
+  if (!tim) return;
+  draft = { notaId: null, nota: blankNota(), payersAuto: true, source: 'ocr' };
 }
 
 async function processImageWithAI(base64Data, mimeType) {
@@ -1654,9 +1159,7 @@ async function processImageWithAI(base64Data, mimeType) {
     onConfirm: () => {
       ensureDraftForParsed();
       if (!draft) return goHome();
-      draft.nota.items = [
-        { id: uid('item'), name: 'Item baru', qty: 1, price: 0, assignedTo: [] },
-      ];
+      draft.nota.items = [{ id: uid('item'), name: 'Item baru', qty: 1, price: 0, assignedTo: [] }];
       navigate('editor');
     },
   });
@@ -1695,7 +1198,6 @@ function loadSampleReceipt() {
   };
   ensureDraftForParsed();
   if (!draft) return goHome();
-  // A one-off split has no roster yet: the sample needs people to be splittable.
   if (oneOff && editorTim().members.length === 0) {
     ['Andi', 'Budi', 'Citra'].forEach((name, index) => {
       const tim = editorTim();
@@ -1715,7 +1217,6 @@ function loadSampleReceipt() {
  * Modal, toast, clipboard
  * ------------------------------------------------------------------ */
 
-/** The domain states the reason; money in it is formatted at this boundary. */
 function readableRefusal(result) {
   const saldo = result.details?.saldo;
   if (typeof saldo !== 'number') return result.message;
@@ -1785,16 +1286,13 @@ function copyToClipboard(text) {
 
 function boot() {
   const savedTim = store.activeTimId ? findTim(store, store.activeTimId) : null;
-  const savedPeriode = savedTim ? findPeriode(savedTim, store.activePeriodeId) : null;
-  if (savedTim && savedPeriode) {
+  if (savedTim) {
     activeTimId = savedTim.id;
-    activePeriodeId = savedPeriode.id;
-    view = 'periode';
+    view = 'tim';
   }
   render();
 }
 
-// Inline handlers in index.html resolve against window; module scope is private.
 Object.assign(window, {
   goHome,
   goBack,
@@ -1804,8 +1302,6 @@ Object.assign(window, {
   removeDraftMember,
   confirmCreateTim,
   openTim,
-  openPeriode,
-  openSettlement,
   addAnggotaToTim,
   markAnggotaKeluar,
   reactivateAnggota,
@@ -1813,16 +1309,6 @@ Object.assign(window, {
   archiveCurrentTim,
   unarchiveCurrentTim,
   deleteCurrentTim,
-  openNewPeriode,
-  editPeriodeLabel,
-  toggleParticipant,
-  saveParticipants,
-  handleSetSaldoAwal,
-  addSetoran,
-  removeNotaFromPeriode,
-  confirmClosePeriode,
-  confirmReopenPeriode,
-  copySettlementWA,
   startManualNota,
   editNota,
   draftChange,
@@ -1838,6 +1324,7 @@ Object.assign(window, {
   cancelEditor,
   confirmResetDraft,
   saveNota,
+  removeNotaFromTim,
   openCamera,
   capturePhoto,
   closeCamera,
